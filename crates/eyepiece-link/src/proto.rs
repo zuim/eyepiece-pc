@@ -1,4 +1,4 @@
-//! Wire protocol, mirrors natartos `mods/eyepiece/bridge/proto.h` (all little-endian).
+//! Wire protocol, mirrors eyepiece `mods/pcdisplay/bridge/proto.h` (all little-endian).
 //!
 //! Every message: 8-byte header `'V' 'R' type flags u32 len` + payload.
 

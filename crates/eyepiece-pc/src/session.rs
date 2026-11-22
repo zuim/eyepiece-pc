@@ -203,7 +203,7 @@ struct Pending {
 fn connect(cfg: &Config, enc: &EncoderConfig, ev: &Events) -> Result<Option<Arc<Link>>, String> {
     let Some(lo) = &cfg.link else { return Ok(None) };
     let l = Link::connect(lo, ev.log.clone())?;
-    (ev.log)(format!("connected to eyepiece_bridge via {}", lo.addr));
+    (ev.log)(format!("connected to the bridge via {}", lo.addr));
     if cfg.video {
         if cfg.stereo {
             // EP_INFO comes right after the connect: only stereo-capable bridges get SBS
@@ -212,7 +212,7 @@ fn connect(cfg: &Config, enc: &EncoderConfig, ev: &Events) -> Result<Option<Arc<
                 std::thread::sleep(Duration::from_millis(20));
             }
             if l.info().is_none_or(|i| i.flags & proto::EP_INFO_STEREO == 0) {
-                return Err("this eyepiece_bridge has no stereo support (needs natartos \
+                return Err("this bridge has no stereo support (needs eyepiece's PC Display, natartos \
                             v0.1.0-eyepiece.5 or newer, or --bridge with a current build)"
                     .into());
             }

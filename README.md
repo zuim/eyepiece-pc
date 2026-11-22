@@ -3,20 +3,22 @@
 PC side of **Eyepiece**: use the DJI Goggles 3 as a USB display for your PC, with head
 tracking back. `eyepiece-pc` captures the PC screen, encodes it with low latency (NVENC,
 VAAPI, AMF, QSV, macOS VideoToolbox or x264 through the FFmpeg libraries) and sends it over USB (`adb forward`)
-to `eyepiece_bridge` on the goggles. The goggles' head attitude comes back at 100 Hz and is
+to the PC Display bridge (`pcdisplay_bridge`) on the goggles. The goggles' head attitude comes back at 100 Hz and is
 forwarded to [opentrack](https://github.com/opentrack/opentrack), so games with head-tracking
 support can use it. `eyepiece-gui` is a desktop UI for the same engine (see [GUI](#gui)).
 
-The goggles side lives in [natartos](https://github.com/zuim/natartos) (branch `eyepiece`,
-mod `mods/eyepiece`; a fork of grom-labs' natartos): it adds an "Eyepiece" entry to the goggles' menu that starts
-`eyepiece_bridge`, and its overlay mod puts the stream on the display. The wire protocol is
-defined in natartos `mods/eyepiece/bridge/proto.h`.
+The goggles side is the **PC Display** mod of [eyepiece](https://github.com/zuim/eyepiece), the
+Goggles 3 mod platform: it adds "PC Display" to the goggles' More menu, which starts
+`pcdisplay_bridge`, and eyepiece's display service (`core.display`) hides the menu while the
+stream is on the screen. The wire protocol is defined in eyepiece
+`mods/pcdisplay/bridge/proto.h`. Before eyepiece, the goggles side was the Eyepiece mod of
+[natartos](https://github.com/zuim/natartos) (branch `eyepiece`); its bridge still works.
 
 ```
  KMS plane / PipeWire / X11 / DXGI ──► convert (GPU: scale, letterbox, NV12) ──► encode (NVENC/VAAPI/…)
         stamped at PC vblank               stage A thread                          stage B thread
                                                                                        │ Annex-B AU, pts = capture time
- opentrack UDP ◄── pose ◄──────── Eyepiece protocol (adb forward tcp:42420) ◄──────────┘──► eyepiece_bridge
+ opentrack UDP ◄── pose ◄──────── Eyepiece protocol (adb forward tcp:42420) ◄──────────┘──► pcdisplay_bridge
 ```
 
 ## Install
@@ -41,9 +43,9 @@ Download from the GitHub releases page:
   ad-hoc signed, **not Developer ID signed or notarized**, so Gatekeeper can
   block it until the user explicitly approves it in System Settings.
 
-You also need `adb` (Android platform-tools) and the goggles running natartos with the
-Eyepiece mod. eyepiece-pc starts the bridge installed with the mod by itself; to use a
-different `eyepiece_bridge` (e.g. a newer natartos release), put it next to the `eyepiece-pc`
+You also need `adb` (Android platform-tools) and the goggles with eyepiece and its PC Display
+mod installed. eyepiece-pc starts the bridge installed with the mod by itself; to use a
+different one (e.g. a newer build), put `pcdisplay_bridge` next to the `eyepiece-pc`
 executable or in `~/.local/share/eyepiece/` (`$XDG_DATA_HOME/eyepiece/`), or pass `--bridge`.
 On macOS, Finder-launched apps may not inherit Homebrew's PATH: set the full path
 to `adb` in the GUI's Advanced settings (typically `/opt/homebrew/bin/adb`).
@@ -233,7 +235,7 @@ plugin code). `--source pipewire` and `--source x11` need no privileges.
 
 ## Usage
 
-Start **Eyepiece** from the goggles' menu (natartos), connect USB, then:
+Connect the goggles by USB and enable ADB (eyepiece's web app, or `ep connect`), then:
 
 ```sh
 eyepiece-pc --list                                  # outputs, planes, framebuffer formats
@@ -248,11 +250,14 @@ eyepiece-pc --bridge-args=-M                        # bridge display-timing metr
 eyepiece-pc --no-deploy                             # use the bridge started from the goggles' menu
 ```
 
-By default eyepiece-pc starts the bridge itself (no need to open Eyepiece in the goggles'
-menu first; a bridge started there is replaced): a local `eyepiece_bridge` / `--bridge` is
-pushed to `/data/local/tmp/eyepiece/`, otherwise the one installed on the goggles is used. It
-runs with `-1 -b` (exits with the PC session); its log is `/data/local/tmp/eyepiece.log` on
-the goggles. `--no-deploy` uses a bridge that is already running.
+By default eyepiece-pc starts the bridge itself (no need to open PC Display in the goggles'
+menu first; a bridge started there is replaced): a local bridge / `--bridge` is pushed to
+`/data/local/tmp/eyepiece/`, otherwise the one installed on the goggles is used. It runs with
+`-1 -b` (exits with the PC session); its log is `/data/local/tmp/eyepiece.log` on the goggles.
+`--no-deploy` uses a bridge that is already running (More → PC Display). The eyepiece mods
+must be running, since they hide the goggles' menu for the stream; a bridge started over ADB
+can reach them only while the session is SELinux-permissive, which `ep connect` and the web
+app set up. eyepiece-pc warns when the menu could not be hidden.
 
 ### Resolution
 
@@ -281,7 +286,7 @@ converter (debugging).
 
 ### USB network (lower latency than adb)
 
-A current `eyepiece_bridge` switches the goggles' USB once per boot to a USB network
+A current bridge switches the goggles' USB once per boot to a USB network
 (RNDIS) next to adb and hands out an address by DHCP (goggles `192.168.60.2`, PC
 `192.168.60.1`; no default route, no DNS). `--transport auto` (default) streams over it
 when the PC side is connected, otherwise over `adb forward` and says so:
@@ -313,7 +318,8 @@ when the PC side is connected, otherwise over `adb forward` and says so:
 2560x720; the goggles switch to their 3D display mode for the session (1280x720 per eye,
 ~60 Hz — the panel's only 3D mode, as used by the goggles' own 3D video player) and back to
 2D when it ends. `eyepiece-pc --stereo --source test` shows a stereo test pattern (right eye
-mirrored). Needs natartos v0.1.0-eyepiece.5 or newer (or `--bridge` with a current build).
+mirrored). Needs eyepiece's PC Display (or natartos v0.1.0-eyepiece.5 or newer, or `--bridge`
+with a current build).
 Feeding it from VR apps (a VR runtime's compositor window as the source, head pose from
 `--head-tracking`) is work in progress.
 
@@ -382,7 +388,7 @@ small bounded queue (dropped when full, the preview then waits for the next keyf
 low-priority thread decodes it (2 threads, loop filter off) and converts every n-th frame
 (about *Max fps*, default 50, evenly spaced) at the chosen width. It is for checking the
 picture, not for judging smoothness or latency. *Keyframes only* is the lightest mode. Measured against the
-protocol test bridge (`eyepiece_bridge_host -N`, test source, 100 fps), capture→send p50 of
+protocol test bridge (`pcdisplay_bridge_host -N`, test source, 100 fps), capture→send p50 of
 the GUI without preview, and with a 640-wide 30 fps preview, stayed within run-to-run noise
 of the CLI (±0.3 ms); a full-size 100 fps preview with x264 on the same CPU added about
 1.5 ms.
@@ -399,8 +405,8 @@ Head tracking is **off by default**: the goggles' IMU stream only runs while a P
 `--head-tracking` turns it on (`--no-video` and `--print-pose` imply it); the bridge stops it
 again when the PC disconnects. `eyepiece-pc` then sends the goggles' yaw/pitch/roll (degrees;
 +yaw right, +pitch up, +roll right ear down) to opentrack's **"UDP over network"** input on
-`127.0.0.1:4242` (`--opentrack HOST:PORT`, `--opentrack ''` = off). Needs a bridge from
-natartos `v0.1.0-eyepiece.4` or later (older bridges stream head tracking always).
+`127.0.0.1:4242` (`--opentrack HOST:PORT`, `--opentrack ''` = off). Needs eyepiece's PC Display
+or a bridge from natartos `v0.1.0-eyepiece.4` or later (older bridges stream head tracking always).
 
 In opentrack: *Input* = "UDP over network", port 4242. Set a centre key in opentrack, and use
 `r` in eyepiece-pc to recenter the goggles' yaw. Then pick the output for your game:
