@@ -270,7 +270,7 @@ impl Link {
         let mut buf = Vec::new();
         let r: std::io::Result<()> = (|| {
             while self.alive() {
-                let mut h = [0u8; HDR_LEN];
+                let mut h = [0u8; ep_hdr_t::SIZE];
                 s.read_exact(&mut h)?;
                 let (t, _f, len) = parse_header(&h).ok_or_else(|| std::io::Error::other("bad magic from goggles"))?;
                 if len > EP_MAX_PAYLOAD {
@@ -315,9 +315,9 @@ impl Link {
                     );
                 }
             }
-            EP_PONG if p.len() >= 16 => {
-                let t_pc = u64::from_le_bytes(p[0..8].try_into().unwrap());
-                let t_dev = u64::from_le_bytes(p[8..16].try_into().unwrap());
+            EP_PONG if p.len() >= ep_pong_t::SIZE => {
+                let at = |o: usize| u64::from_le_bytes(p[o..o + 8].try_into().unwrap());
+                let (t_pc, t_dev) = (at(ep_pong_t::T_PC_US), at(ep_pong_t::T_DEV_US));
                 let now = mono_us();
                 let rtt = now.saturating_sub(t_pc);
                 sh.clock.lock().unwrap().add(rtt, t_dev as i64 - (t_pc + rtt / 2) as i64);
