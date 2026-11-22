@@ -11,7 +11,8 @@ The goggles side is the **PC Display** mod of [eyepiece](https://github.com/zuim
 Goggles 3 mod platform: it adds "PC Display" to the goggles' More menu, which starts
 `pcdisplay_bridge`, and eyepiece's display service (`core.display`) hides the menu while the
 stream is on the screen. The wire protocol is defined in eyepiece
-`mods/pcdisplay/bridge/proto.h`. Before eyepiece, the goggles side was the Eyepiece mod of
+`mods/pcdisplay/protocol.json`; `crates/eyepiece-link/src/proto_gen.rs` is generated from it
+(eyepiece: `./ep gen --pc=<this checkout>`) and must not be edited here. Before eyepiece, the goggles side was the Eyepiece mod of
 [natartos](https://github.com/zuim/natartos) (branch `eyepiece`); its bridge still works.
 
 ```

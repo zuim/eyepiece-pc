@@ -72,7 +72,7 @@ impl Config {
     /// Encoded frame size: the panel (mono), or both eyes side by side (stereo).
     pub fn frame_size(&self) -> (u32, u32) {
         if self.stereo {
-            (2 * proto::SBS_EYE_W, proto::SBS_EYE_H)
+            (2 * proto::EP_SBS_EYE_W, proto::EP_SBS_EYE_H)
         } else {
             (PANEL_W, PANEL_H)
         }
