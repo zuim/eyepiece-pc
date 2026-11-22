@@ -15,27 +15,28 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-const BRIDGE_NAME: &str = "eyepiece_bridge";
+/// Local bridge file names: eyepiece's (`pcdisplay_bridge`), natartos' (legacy).
+const BRIDGE_NAMES: [&str; 2] = ["pcdisplay_bridge", "eyepiece_bridge"];
 
-/// `--deploy` without `--bridge`: `eyepiece_bridge` next to this executable, else
-/// `$XDG_DATA_HOME/eyepiece/eyepiece_bridge` (default `~/.local/share/...`); `None` = no local
-/// bridge → the one already on the goggles (natartos' Eyepiece mod) is started.
+/// `--deploy` without `--bridge`: a bridge next to this executable, else in
+/// `$XDG_DATA_HOME/eyepiece/` (default `~/.local/share/...`); `None` = no local
+/// bridge → the one installed on the goggles (eyepiece's PC Display mod) is started.
 fn find_bridge() -> Option<PathBuf> {
-    let mut tried = vec![];
+    let mut dirs = vec![];
     if let Some(dir) = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
     {
-        tried.push(dir.join(BRIDGE_NAME));
+        dirs.push(dir);
     }
     let data = std::env::var_os("XDG_DATA_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
     if let Some(d) = data {
-        tried.push(d.join("eyepiece").join(BRIDGE_NAME));
+        dirs.push(d.join("eyepiece"));
     }
-    tried.into_iter().find(|p| p.is_file())
+    dirs.iter().flat_map(|d| BRIDGE_NAMES.iter().map(move |n| d.join(n))).find(|p| p.is_file())
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -52,7 +53,7 @@ fn find_bridge() -> Option<PathBuf> {
 Examples:\n  eyepiece-pc                                 # start the bridge on the goggles, KMS capture of the first screen\n  \
 eyepiece-pc --output eDP-1 --encoder nvenc --bitrate 30M\n  \
 eyepiece-pc --no-deploy                     # use the bridge started from the goggles' menu\n  \
-eyepiece-pc --source test --host 127.0.0.1 --no-forward   # against eyepiece_bridge_host -N\n  \
+eyepiece-pc --source test --host 127.0.0.1 --no-forward   # against pcdisplay_bridge_host -N\n  \
 eyepiece-pc --list                          # outputs / planes"
 )]
 pub struct Args {
@@ -81,19 +82,19 @@ pub struct Args {
     #[arg(long)]
     pub no_forward: bool,
     /// don't start a bridge for this session: use the one already running on the goggles
-    /// (started from their menu). Default: start one (push --bridge / a local
-    /// eyepiece_bridge if there is one, else the bridge installed on the goggles); it
+    /// (started from their menu). Default: start one (push --bridge / a local bridge if
+    /// there is one, else the bridge installed on the goggles); it
     /// replaces a bridge started from the menu and exits with this session
     #[arg(long)]
     pub no_deploy: bool,
     /// (the default; kept for scripts)
     #[arg(long, hide = true)]
     pub deploy: bool,
-    /// eyepiece_bridge binary for --deploy [default: next to this executable, else
-    /// $XDG_DATA_HOME/eyepiece/eyepiece_bridge]
+    /// bridge binary to push and start [default: pcdisplay_bridge or eyepiece_bridge next to
+    /// this executable, else in $XDG_DATA_HOME/eyepiece/; none: the one on the goggles]
     #[arg(long)]
     pub bridge: Option<PathBuf>,
-    /// extra eyepiece_bridge args for --deploy (e.g. --bridge-args=-M)
+    /// extra bridge args (e.g. --bridge-args=-M)
     #[arg(long, default_value = "", allow_hyphen_values = true)]
     pub bridge_args: String,
     /// ask the bridge to exit when we quit
@@ -553,8 +554,8 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
             )?;
         } else if !a.no_forward && !adb.bridge_running() {
             log(
-                "no eyepiece_bridge running on the goggles: start Eyepiece from the goggles' menu \
-                 (natartos), or use --deploy"
+                "no bridge running on the goggles: start More → PC Display on the goggles, or leave out \
+                 --no-deploy (then eyepiece-pc starts it)"
                     .into(),
             );
         }

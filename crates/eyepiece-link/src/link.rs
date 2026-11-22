@@ -1,4 +1,4 @@
-//! TCP connection to eyepiece_bridge: send side (video/stream/ping/ctrl), receive thread
+//! TCP connection to the goggles' bridge (pcdisplay_bridge): send side (video/stream/ping/ctrl), receive thread
 //! (pose, pong, frame reports, log, info), clock sync, IDR requests, opentrack output.
 
 use crate::clock::mono_us;
@@ -95,7 +95,7 @@ impl Link {
                 Err(e) => {
                     if Instant::now() >= t_end {
                         return Err(format!(
-                            "cannot connect to eyepiece_bridge on {} ({e}); is it running and is \
+                            "cannot connect to the bridge on {} ({e}); is it running and is \
                              `adb forward tcp:{p} tcp:{p}` set?",
                             o.addr,
                             p = EP_PORT
