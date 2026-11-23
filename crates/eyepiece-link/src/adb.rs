@@ -1,35 +1,17 @@
 //! `adb` (platform-tools) helpers: forward, deploy, stop — same behaviour as eyepiece_stream.py.
 
-use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-/// Where `--deploy` pushes a local bridge.
-pub const DEVICE_DIR: &str = "/data/local/tmp/eyepiece";
-/// Bridges installed on the goggles (started from their menu), tried in this order: eyepiece's
-/// PC Display mod, then natartos' Eyepiece mod (legacy; remove at eyepiece-pc 1.0).
-pub const INSTALLED_BRIDGES: [&str; 2] = [
-    "/vendor/eyepiece/current/mods/pcdisplay/bin/pcdisplay_bridge",
-    "/vendor/natartos/apps/eyepiece/eyepiece_bridge",
-];
-/// Process names of a running bridge (eyepiece, natartos/pushed), for `pidof`.
-const BRIDGE_PROCS: &str = "pcdisplay_bridge eyepiece_bridge";
-/// Present when eyepiece is installed.
-const EYEPIECE_CURRENT: &str = "/vendor/eyepiece/current";
-/// eyepiece's run root: with it a bridge started here finds core.display's GUI-hide lease
-/// (`run/display/`). Its own temp files stay in /data/local/tmp (no `EP_RUN_DIR`), which the
-/// ADB shell can write in every SELinux mode; the bridge from the menu is stopped first anyway.
-const EYEPIECE_ENV: &str = "EP_RUN_ROOT=/data/vendor/eyepiece/run";
-/// The log of a bridge started here (`-l`; the ADB shell can write it in every SELinux mode).
-pub const DEVICE_LOG: &str = "/data/local/tmp/eyepiece.log";
-
-/// `p1 p2 …` for a shell `for` loop: the pushed bridge, then the installed ones.
-fn bridge_candidates() -> String {
-    std::iter::once(format!("{DEVICE_DIR}/eyepiece_bridge"))
-        .chain(INSTALLED_BRIDGES.iter().map(|s| s.to_string()))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+/// The bridge of eyepiece's PC Display mod: the only one eyepiece-pc starts.
+pub const BRIDGE: &str = "/vendor/eyepiece/current/mods/pcdisplay/bin/pcdisplay_bridge";
+/// Its process name, for `pidof`.
+const BRIDGE_PROC: &str = "pcdisplay_bridge";
+/// The same environment core.menu gives it: its run dir (lock, log, DHCP files; the ADB shell
+/// may write it under enforcing too) and eyepiece's run root (core.display's GUI-hide lease).
+const BRIDGE_ENV: &str = "EP_RUN_DIR=/data/vendor/eyepiece/run/pcdisplay EP_RUN_ROOT=/data/vendor/eyepiece/run";
+/// Its log (the default of a bridge with `EP_RUN_DIR`; the menu's bridge writes it too).
+pub const DEVICE_LOG: &str = "/data/vendor/eyepiece/run/pcdisplay/bridge.log";
 
 #[derive(Clone, Debug)]
 pub struct Adb {
@@ -74,13 +56,15 @@ impl Adb {
     }
 
     pub fn stop_bridge(&self) {
-        if let Ok(pid) = self.shell(&format!("pidof {BRIDGE_PROCS}"), false) {
-            if !pid.is_empty() {
-                let _ = self.shell(&format!("kill {pid}"), false);
-                // the bridge's helper sends the MCU head-attitude stop on SIGTERM
-                std::thread::sleep(Duration::from_millis(2500));
-            }
-        }
+        // SIGTERM: the bridge leaves the hub (which stops the MCU stream) and hands the display
+        // back; wait until it is gone (usually well under a second), at most 3 s
+        let _ = self.shell(
+            &format!(
+                "p=$(pidof {BRIDGE_PROC}) && kill $p && \
+                 i=0; while pidof {BRIDGE_PROC} >/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done; true"
+            ),
+            false,
+        );
         self.mcu_stop_safety();
     }
 
@@ -94,10 +78,7 @@ impl Adb {
         }
         let out = self
             .shell(
-                &format!(
-                    "for b in {}; do [ -x $b ] && {{ $b -Z 2>&1 | grep 'MCU attitude'; break; }}; done",
-                    bridge_candidates()
-                ),
+                &format!("[ -x {BRIDGE} ] && {BRIDGE} -Z 2>&1 | grep 'MCU attitude'; true"),
                 false,
             )
             .unwrap_or_default();
@@ -112,16 +93,15 @@ impl Adb {
 
     /// True if a bridge process runs on the goggles.
     pub fn bridge_running(&self) -> bool {
-        !self.shell(&format!("pidof {BRIDGE_PROCS}"), false).unwrap_or_default().trim().is_empty()
+        !self.shell(&format!("pidof {BRIDGE_PROC}"), false).unwrap_or_default().trim().is_empty()
     }
 
-    /// Start the bridge on the goggles with `-1` (exit with the PC session: a bridge left
-    /// running keeps the goggles black) plus `extra_args`. `bridge` = a local binary to push
-    /// first; `None` = use one already on the goggles (pushed earlier, or the one installed
-    /// with eyepiece's PC Display mod or natartos' Eyepiece mod).
+    /// Start eyepiece's bridge on the goggles with `-1` (exit with the PC session: a bridge left
+    /// running keeps the goggles black) plus `extra_args`. A bridge already running (from the
+    /// menu) hands over to it by itself.
     /// `usb_net`: ask the bridge to switch the goggles' USB to network + adb (`-U rndis`; only
     /// bridges that know the option get it).
-    pub fn deploy(&self, bridge: Option<&Path>, extra_args: &str, usb_net: bool, log: &dyn Fn(String)) -> Result<(), String> {
+    pub fn deploy(&self, extra_args: &str, usb_net: bool, log: &dyn Fn(String)) -> Result<(), String> {
         if let Err(e) = self.run(&["get-state"], true) {
             return Err(format!(
                 "ADB could not select the goggles: {e}\n\
@@ -131,52 +111,29 @@ impl Adb {
                  on Windows, make sure Advanced → adb executable points to the same adb.exe."
             ));
         }
-        let exe = match bridge {
-            Some(bridge) => {
-                if !bridge.is_file() {
-                    return Err(format!("{} not found (--bridge)", bridge.display()));
-                }
-                self.shell(&format!("mkdir -p {DEVICE_DIR}"), true)?;
-                self.run(&["push", &bridge.to_string_lossy(), &format!("{DEVICE_DIR}/eyepiece_bridge")], true)?;
-                self.shell(&format!("chmod 755 {DEVICE_DIR}/eyepiece_bridge"), true)?;
-                format!("{DEVICE_DIR}/eyepiece_bridge")
-            }
-            None => {
-                let p = self
-                    .shell(
-                        &format!("for p in {}; do [ -x $p ] && echo $p && break; done", bridge_candidates()),
-                        true,
-                    )?
-                    .trim()
-                    .to_string();
-                if p.is_empty() {
-                    return Err("no bridge on the PC (eyepiece_bridge next to this program, or --bridge PATH) \
-                                and none on the goggles: install eyepiece with the PC Display mod"
-                        .into());
-                }
-                log(format!("no local bridge: starting the one on the goggles ({p})"));
-                p
-            }
-        };
+        let exe = BRIDGE;
         let mut args = extra_args.to_string();
+        let help = self.shell(&format!("[ -x {exe} ] && {exe} -h 2>&1; true"), false).unwrap_or_default();
+        if help.trim().is_empty() {
+            return Err("PC Display is not installed on the goggles: install eyepiece with the PC Display mod \
+                        (web app, or `ep install`)"
+                .into());
+        }
         if usb_net && !args.contains("-U") {
-            let help = self.shell(&format!("{exe} -h 2>&1; true"), false).unwrap_or_default();
             if help.contains("-U adb|rndis") {
                 args = format!("-U rndis {args}");
             } else {
                 log("this bridge has no USB network support (an older build): adb only".into());
             }
         }
-        let eyepiece = self.shell(&format!("[ -d {EYEPIECE_CURRENT} ] && echo y; true"), false).unwrap_or_default();
-        let env = if eyepiece.trim() == "y" { EYEPIECE_ENV } else { "" };
-        self.stop_bridge();
-        // a fresh log: the "listening on" wait below must not see an older run's line
-        self.shell(&format!("rm -f {DEVICE_LOG}"), false)?;
-        self.shell(&format!("{env} nohup {exe} -1 -b -l {DEVICE_LOG} {args} >/dev/null 2>&1 < /dev/null &"), true)?;
+        // a fresh log (the older one kept as .1): the "listening on" wait below must not see an
+        // older run's line
+        self.shell(&format!("mv -f {DEVICE_LOG} {DEVICE_LOG}.1 2>/dev/null; true"), false)?;
+        self.shell(&format!("{BRIDGE_ENV} nohup {exe} -1 -b -l {DEVICE_LOG} {args} >/dev/null 2>&1 < /dev/null &"), true)?;
         // adb forward accepts a TCP connect even when nothing listens on the goggles yet (and
         // closes it right away), so a connect is no proof: wait for the bridge's own log line.
-        // Startup takes >1 s without fb_gui_hide (overlay ack wait), and a bridge that switches
-        // USB to RNDIS + adb drops adb for a few seconds (sometimes until `adb reconnect`).
+        // A bridge that switches USB to RNDIS + adb drops adb for a few seconds (sometimes
+        // until `adb reconnect`).
         let t0 = std::time::Instant::now();
         let mut last_reconnect = t0;
         let mut offline_logged = false;
@@ -204,19 +161,15 @@ impl Adb {
             }
             std::thread::sleep(Duration::from_millis(300));
         }
-        let pid = self.shell(&format!("pidof {BRIDGE_PROCS}"), false).unwrap_or_default();
+        let pid = self.shell(&format!("pidof {BRIDGE_PROC}"), false).unwrap_or_default();
         let started = self.shell(&format!("cat {DEVICE_LOG} 2>/dev/null; true"), false).unwrap_or_default();
         for l in started.lines().filter(|l| l.contains("rndis:")) {
             log(format!("goggles: {}", l.split_once(' ').map(|x| x.1).unwrap_or(l)));
         }
         log(format!("bridge running on goggles ({exe}, pid {pid})"));
-        // the bridge's own word on the GUI plane (it hides it through the display service in
-        // dji_glasses: eyepiece's core.display, natartos' overlay)
-        if started.contains("overlay has no fb_gui_hide") || started.contains("framebuffer unavailable") {
-            log("WARNING: the goggles' menu could not be hidden for the stream (no answer from the display \
-                 service in the goggles' UI), so the picture may stay behind it. eyepiece: start the mods \
-                 (web app, or `ep start`) after `ep connect` (it makes the session permissive, which a bridge \
-                 started over ADB needs); natartos: `toolya natartos start`"
+        if started.contains("core.display did not hide the GUI") {
+            log("WARNING: the goggles' mods are not running, so the bridge can't show a picture \
+                 (head tracking only): start them (web app, or `ep start`), then connect again"
                 .into());
         }
         Ok(())

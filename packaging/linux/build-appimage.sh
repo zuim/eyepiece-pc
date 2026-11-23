@@ -42,10 +42,6 @@ done
 cp "$HERE/eyepiece-gui.desktop" "$APPDIR/usr/share/applications/"
 cp "$HERE/eyepiece-gui.svg" "$APPDIR/usr/share/icons/hicolor/scalable/apps/"
 cp README.md LICENSE "$APPDIR/"
-# a bridge to push (pcdisplay_bridge, legacy eyepiece_bridge): next to the executables if you have one
-for b in pcdisplay_bridge eyepiece_bridge; do
-    if [ -f "$HERE/$b" ]; then cp "$HERE/$b" "$APPDIR/usr/bin/"; fi
-done
 
 # one AppImage, two programs: a symlink named eyepiece-pc… runs the CLI (AppImage sets
 # $ARGV0 to the name it was started as), everything else the GUI
