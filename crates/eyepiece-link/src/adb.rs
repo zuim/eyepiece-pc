@@ -7,9 +7,10 @@ use std::time::Duration;
 pub const BRIDGE: &str = "/vendor/eyepiece/current/mods/pcdisplay/bin/pcdisplay_bridge";
 /// Its process name, for `pidof`.
 const BRIDGE_PROC: &str = "pcdisplay_bridge";
-/// The same environment core.menu gives it: its run dir (lock, log, DHCP files; the ADB shell
-/// may write it under enforcing too) and eyepiece's run root (core.display's GUI-hide lease).
-const BRIDGE_ENV: &str = "EP_RUN_DIR=/data/vendor/eyepiece/run/pcdisplay EP_RUN_ROOT=/data/vendor/eyepiece/run";
+/// core.menu's launch request (eyepiece contract `files.launch_req`): the bridge starts as from
+/// the goggles' menu, with the menu's environment and in the UI's SELinux domain, so it may use
+/// the hub (head tracking) also under enforcing, unlike a bridge started from the ADB shell.
+const LAUNCH_REQ: &str = "/data/vendor/eyepiece/run/menu/launch.req";
 /// Its log (the default of a bridge with `EP_RUN_DIR`; the menu's bridge writes it too).
 pub const DEVICE_LOG: &str = "/data/vendor/eyepiece/run/pcdisplay/bridge.log";
 
@@ -96,9 +97,9 @@ impl Adb {
         !self.shell(&format!("pidof {BRIDGE_PROC}"), false).unwrap_or_default().trim().is_empty()
     }
 
-    /// Start eyepiece's bridge on the goggles with `-1` (exit with the PC session: a bridge left
-    /// running keeps the goggles black) plus `extra_args`. A bridge already running (from the
-    /// menu) hands over to it by itself.
+    /// Start eyepiece's bridge on the goggles through core.menu, with `-1` (exit with the PC
+    /// session: a bridge left running keeps the goggles black) plus `extra_args`. A bridge
+    /// already running (from the menu) hands over to it by itself. Needs the mods running.
     /// `usb_net`: ask the bridge to switch the goggles' USB to network + adb (`-U rndis`; only
     /// bridges that know the option get it).
     pub fn deploy(&self, extra_args: &str, usb_net: bool, log: &dyn Fn(String)) -> Result<(), String> {
@@ -129,7 +130,21 @@ impl Adb {
         // a fresh log (the older one kept as .1): the "listening on" wait below must not see an
         // older run's line
         self.shell(&format!("mv -f {DEVICE_LOG} {DEVICE_LOG}.1 2>/dev/null; true"), false)?;
-        self.shell(&format!("{BRIDGE_ENV} nohup {exe} -1 -b -l {DEVICE_LOG} {args} >/dev/null 2>&1 < /dev/null &"), true)?;
+        let line = format!("pcdisplay -1 -l {DEVICE_LOG} {args}");
+        let taken = self.shell(
+            &format!(
+                "printf '%s\\n' '{}' > {LAUNCH_REQ}.tmp && mv -f {LAUNCH_REQ}.tmp {LAUNCH_REQ} && \
+                 i=0; while [ -e {LAUNCH_REQ} ] && [ $i -lt 20 ]; do sleep 0.1; i=$((i+1)); done; \
+                 [ -e {LAUNCH_REQ} ] && rm -f {LAUNCH_REQ} && echo none; true",
+                line.trim()
+            ),
+            true,
+        )?;
+        if taken.contains("none") {
+            return Err("the eyepiece mods are not running on the goggles: start them (web app, or `ep start`), \
+                        then connect again"
+                .into());
+        }
         // adb forward accepts a TCP connect even when nothing listens on the goggles yet (and
         // closes it right away), so a connect is no proof: wait for the bridge's own log line.
         // A bridge that switches USB to RNDIS + adb drops adb for a few seconds (sometimes
