@@ -1,7 +1,7 @@
 //! eyepiece-pc command line: the options, and how they become a [`Config`] (adb deploy/forward
 //! included). The `eyepiece-pc` binary is [`main`]; other frontends (the GUI) build an [`Args`]
 //! and use [`prepare`] + [`run_prepared`], so every frontend takes the same code path.
-//! Replaces legacy/eyepiece_stream.py (same protocol, same bridge). See README.md.
+//! See README.md.
 
 use crate::session::{self, Config, Control, Events, SourceKind};
 use clap::Parser;
@@ -14,30 +14,6 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-
-/// Local bridge file names: eyepiece's (`pcdisplay_bridge`), natartos' (legacy).
-const BRIDGE_NAMES: [&str; 2] = ["pcdisplay_bridge", "eyepiece_bridge"];
-
-/// `--deploy` without `--bridge`: a bridge next to this executable, else in
-/// `$XDG_DATA_HOME/eyepiece/` (default `~/.local/share/...`); `None` = no local
-/// bridge → the one installed on the goggles (eyepiece's PC Display mod) is started.
-fn find_bridge() -> Option<PathBuf> {
-    let mut dirs = vec![];
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-    {
-        dirs.push(dir);
-    }
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
-    if let Some(d) = data {
-        dirs.push(d.join("eyepiece"));
-    }
-    dirs.iter().flat_map(|d| BRIDGE_NAMES.iter().map(move |n| d.join(n))).find(|p| p.is_file())
-}
 
 #[derive(Parser, Debug, Clone)]
 #[cfg_attr(
@@ -82,18 +58,13 @@ pub struct Args {
     #[arg(long)]
     pub no_forward: bool,
     /// don't start a bridge for this session: use the one already running on the goggles
-    /// (started from their menu). Default: start one (push --bridge / a local bridge if
-    /// there is one, else the bridge installed on the goggles); it
+    /// (started from their menu). Default: start eyepiece's bridge (PC Display); it
     /// replaces a bridge started from the menu and exits with this session
     #[arg(long)]
     pub no_deploy: bool,
     /// (the default; kept for scripts)
     #[arg(long, hide = true)]
     pub deploy: bool,
-    /// bridge binary to push and start [default: pcdisplay_bridge or eyepiece_bridge next to
-    /// this executable, else in $XDG_DATA_HOME/eyepiece/; none: the one on the goggles]
-    #[arg(long)]
-    pub bridge: Option<PathBuf>,
     /// extra bridge args (e.g. --bridge-args=-M)
     #[arg(long, default_value = "", allow_hyphen_values = true)]
     pub bridge_args: String,
@@ -545,13 +516,7 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
     let adb = Adb::new(a.adb.clone(), a.serial.clone());
     if !a.no_connect {
         if !a.no_deploy {
-            let bridge = a.bridge.clone().or_else(find_bridge);
-            adb.deploy(
-                bridge.as_deref(),
-                &a.bridge_args,
-                a.transport != "adb",
-                &**log,
-            )?;
+            adb.deploy(&a.bridge_args, a.transport != "adb", &**log)?;
         } else if !a.no_forward && !adb.bridge_running() {
             log(
                 "no bridge running on the goggles: start More → PC Display on the goggles, or leave out \

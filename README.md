@@ -12,8 +12,7 @@ Goggles 3 mod platform: it adds "PC Display" to the goggles' More menu, which st
 `pcdisplay_bridge`, and eyepiece's display service (`core.display`) hides the menu while the
 stream is on the screen. The wire protocol is defined in eyepiece
 `mods/pcdisplay/protocol.json`; `crates/eyepiece-link/src/proto_gen.rs` is generated from it
-(eyepiece: `./ep gen --pc=<this checkout>`) and must not be edited here. Before eyepiece, the goggles side was the Eyepiece mod of
-[natartos](https://github.com/zuim/natartos) (branch `eyepiece`); its bridge still works.
+(eyepiece: `./ep gen --pc=<this checkout>`) and must not be edited here.
 
 ```
  KMS plane / PipeWire / X11 / DXGI ──► convert (GPU: scale, letterbox, NV12) ──► encode (NVENC/VAAPI/…)
@@ -45,9 +44,7 @@ Download from the GitHub releases page:
   block it until the user explicitly approves it in System Settings.
 
 You also need `adb` (Android platform-tools) and the goggles with eyepiece and its PC Display
-mod installed. eyepiece-pc starts the bridge installed with the mod by itself; to use a
-different one (e.g. a newer build), put `pcdisplay_bridge` next to the `eyepiece-pc`
-executable or in `~/.local/share/eyepiece/` (`$XDG_DATA_HOME/eyepiece/`), or pass `--bridge`.
+mod installed. eyepiece-pc starts the bridge installed with the mod by itself.
 On macOS, Finder-launched apps may not inherit Homebrew's PATH: set the full path
 to `adb` in the GUI's Advanced settings (typically `/opt/homebrew/bin/adb`).
 The optional external `--preview` window also requires `ffplay` on PATH.
@@ -252,9 +249,10 @@ eyepiece-pc --no-deploy                             # use the bridge started fro
 ```
 
 By default eyepiece-pc starts the bridge itself (no need to open PC Display in the goggles'
-menu first; a bridge started there is replaced): a local bridge / `--bridge` is pushed to
-`/data/local/tmp/eyepiece/`, otherwise the one installed on the goggles is used. It runs with
-`-1 -b` (exits with the PC session); its log is `/data/local/tmp/eyepiece.log` on the goggles.
+menu first; a bridge started there is replaced). It is the one installed with PC Display,
+started with the menu's environment and `-1 -b` (exits with the PC session); its log is
+`/data/vendor/eyepiece/run/pcdisplay/bridge.log` on the goggles. The eyepiece mods must be
+running: without them the bridge can't hide the goggles' menu and shows no picture.
 `--no-deploy` uses a bridge that is already running (More → PC Display). The eyepiece mods
 must be running, since they hide the goggles' menu for the stream; a bridge started over ADB
 can reach them only while the session is SELinux-permissive, which `ep connect` and the web
@@ -319,8 +317,7 @@ when the PC side is connected, otherwise over `adb forward` and says so:
 2560x720; the goggles switch to their 3D display mode for the session (1280x720 per eye,
 ~60 Hz — the panel's only 3D mode, as used by the goggles' own 3D video player) and back to
 2D when it ends. `eyepiece-pc --stereo --source test` shows a stereo test pattern (right eye
-mirrored). Needs eyepiece's PC Display (or natartos v0.1.0-eyepiece.5 or newer, or `--bridge`
-with a current build).
+mirrored). Needs eyepiece's PC Display.
 Feeding it from VR apps (a VR runtime's compositor window as the source, head pose from
 `--head-tracking`) is work in progress.
 
@@ -406,8 +403,7 @@ Head tracking is **off by default**: the goggles' IMU stream only runs while a P
 `--head-tracking` turns it on (`--no-video` and `--print-pose` imply it); the bridge stops it
 again when the PC disconnects. `eyepiece-pc` then sends the goggles' yaw/pitch/roll (degrees;
 +yaw right, +pitch up, +roll right ear down) to opentrack's **"UDP over network"** input on
-`127.0.0.1:4242` (`--opentrack HOST:PORT`, `--opentrack ''` = off). Needs eyepiece's PC Display
-or a bridge from natartos `v0.1.0-eyepiece.4` or later (older bridges stream head tracking always).
+`127.0.0.1:4242` (`--opentrack HOST:PORT`, `--opentrack ''` = off). Needs eyepiece's PC Display.
 
 In opentrack: *Input* = "UDP over network", port 4242. Set a centre key in opentrack, and use
 `r` in eyepiece-pc to recenter the goggles' yaw. Then pick the output for your game:
@@ -486,13 +482,6 @@ stack (libva, libvdpau, NVIDIA/CUDA, OpenCL, Vulkan, GL), libdrm, PipeWire and t
 libraries from the host. An AppImage cannot carry file capabilities, so KMS capture does not
 work from it (use PipeWire or X11 capture, or a native install with `setcap`).
 
-## Legacy
-
-[`legacy/eyepiece_stream.py`](legacy/eyepiece_stream.py) is the earlier Python
-implementation (ffmpeg subprocess + FLV pipe, standard library only), kept as a fallback;
-`legacy/bench.py` measures its PC half, `legacy/kmsfix.c` is a shim that let ffmpeg's
-kmsgrab capture KWin's 10-bit framebuffers.
-
 ## License
 
-AGPL-3.0-or-later, same as natartos. See [LICENSE](LICENSE).
+AGPL-3.0-or-later. See [LICENSE](LICENSE).

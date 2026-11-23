@@ -880,7 +880,6 @@ impl App {
             });
             row(ui, "no adb forward", |ui| ui.checkbox(&mut a.no_forward, "--no-forward"));
             row(ui, "use running bridge", |ui| ui.checkbox(&mut a.no_deploy, "--no-deploy"));
-            row(ui, "bridge binary", |ui| opt_path(ui, &mut a.bridge, "next to exe / $XDG_DATA_HOME/eyepiece"));
             row(ui, "bridge args", |ui| ui.text_edit_singleline(&mut a.bridge_args));
             row(ui, "stop bridge on quit", |ui| ui.checkbox(&mut a.stop_bridge, "--stop-bridge"));
             row(ui, "reconnect", |ui| ui.checkbox(&mut a.reconnect, "--reconnect"));
