@@ -2,7 +2,7 @@
 
 PC side of **Eyepiece**: use the DJI Goggles 3 as a USB display for your PC, with head
 tracking back. `eyepiece-pc` captures the PC screen, encodes it with low latency (NVENC,
-VAAPI, AMF, QSV or x264 through the FFmpeg libraries) and sends it over USB (`adb forward`)
+VAAPI, AMF, QSV, macOS VideoToolbox or x264 through the FFmpeg libraries) and sends it over USB (`adb forward`)
 to `eyepiece_bridge` on the goggles. The goggles' head attitude comes back at 100 Hz and is
 forwarded to [opentrack](https://github.com/opentrack/opentrack), so games with head-tracking
 support can use it. `eyepiece-gui` is a desktop UI for the same engine (see [GUI](#gui)).
@@ -36,11 +36,18 @@ Download from the GitHub releases page:
   NVENC needs NVIDIA driver 530 or newer; AMF and QSV are not included.
 - `eyepiece-pc-<version>-windows-x86_64.zip` (`eyepiece-pc.exe` + `eyepiece-gui.exe`) — includes the FFmpeg DLLs (BtbN shared build).
   **The Windows (DXGI capture) path is untested.**
+- `eyepiece-pc-<version>-macos-arm64.dmg` — Apple Silicon app bundle and CLI,
+  with FFmpeg libraries included; requires macOS 15 or newer. The bundle is
+  ad-hoc signed, **not Developer ID signed or notarized**, so Gatekeeper can
+  block it until the user explicitly approves it in System Settings.
 
 You also need `adb` (Android platform-tools) and the goggles running natartos with the
 Eyepiece mod. eyepiece-pc starts the bridge installed with the mod by itself; to use a
 different `eyepiece_bridge` (e.g. a newer natartos release), put it next to the `eyepiece-pc`
 executable or in `~/.local/share/eyepiece/` (`$XDG_DATA_HOME/eyepiece/`), or pass `--bridge`.
+On macOS, Finder-launched apps may not inherit Homebrew's PATH: set the full path
+to `adb` in the GUI's Advanced settings (typically `/opt/homebrew/bin/adb`).
+The optional external `--preview` window also requires `ffplay` on PATH.
 
 Recommended on Linux: install to `~/.local/bin` (see [Permissions](#permissions-linux-kms-capture)).
 
@@ -50,6 +57,10 @@ install -Dm755 eyepiece-pc-*/eyepiece-pc ~/.local/bin/eyepiece-pc
 ```
 
 ### Build from source
+
+With Nix, `nix build` builds the workspace binaries. The package supports Linux
+and Apple Silicon macOS; Intel macOS lacks a Swift 6 package in the pinned
+nixpkgs. `nix develop` provides a development shell.
 
 Linux (Debian/Ubuntu package names; FFmpeg 9 headers, tested with 9.0.2):
 
@@ -78,6 +89,128 @@ $env:FFMPEG_INCLUDE_DIR = "C:\ffmpeg\include"; $env:FFMPEG_LIB_DIR = "C:\ffmpeg\
 $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
 cargo build --release      # put C:\ffmpeg\bin (the DLLs) on PATH or next to the .exe
 ```
+
+### macOS
+
+The CLI now has a [ScreenCaptureKit backend](https://github.com/doom-fish/screencapturekit-rs)
+and FFmpeg VideoToolbox encoding. Requires macOS 13+, Xcode 26 (with the macOS 26
+SDK and Swift compiler, for the Swift bridges), current stable Rust and
+FFmpeg headers. The lockfile includes Edition 2024 dependencies; Cargo 1.83 is too old.
+The CI release is an ad-hoc-signed Apple Silicon app bundle, not a notarized
+menu-bar app or an iOS app. Source builds support macOS 13+; the CI bundle targets
+macOS 15+ because its Homebrew libraries are built on the macOS 15 runner.
+
+The Intel macOS Nix development shell uses Swift 5.10 and the macOS 14 SDK,
+which are too old for the current `apple-metal` dependency.
+
+```sh
+brew install rust ffmpeg pkg-config llvm android-platform-tools
+export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
+export MACOSX_DEPLOYMENT_TARGET=13.0
+cargo build --release
+target/release/eyepiece-pc --list
+target/release/eyepiece-pc --source screencapturekit --encoder videotoolbox --fps 60 --cursor
+target/release/eyepiece-pc --display-id 1 --encoder videotoolbox   # use an actual ID from --list
+```
+
+Grant your terminal (or packaged app) permission in **System Settings > Privacy &
+Security > Screen & System Audio Recording**, then restart it. Capture is never
+started by unit tests. For an app bundle, include `NSScreenCaptureUsageDescription`
+in its Info.plist and sign the bundle; no entitlement bypasses Screen Recording
+consent. Protected content can be blanked by macOS.
+
+CI builds the DMG with `VERSION=<tag-or-commit> bash packaging/macos/build-dmg.sh`.
+It includes both executables and their non-system linked libraries in the app;
+the CLI is `Eyepiece.app/Contents/MacOS/eyepiece-pc`. CI also records Homebrew
+formula metadata for FFmpeg and its installed dependencies inside the bundle.
+Ad-hoc signing is not Apple notarization; Developer ID signing, notarization,
+and a signed release workflow require separate credentials and configuration.
+
+ScreenCaptureKit is the default source on macOS (`sck` is an alias). The first
+available display is selected unless `--display-id` is provided. Capture uses a
+latest-frame slot, stamps frames with the shared monotonic clock at callback
+arrival, and supports forced keyframes on static screens.
+`--fps` is a requested maximum; display refresh and ScreenCaptureKit delivery
+determine the actual cadence. `--sync` does not change ScreenCaptureKit scheduling.
+Forced static-screen replays are paced at the requested frame interval, including
+while waiting for the first encoded keyframe.
+With a VideoToolbox encoder and no `--vf` or `--cpu-scale`, capture now requests
+encoder-sized video-range NV12 (`420v`) surfaces. ScreenCaptureKit performs
+scaling, chroma-aligned letterboxing and Rec.709 conversion. The original
+`CVPixelBuffer` is retained in an `AV_PIX_FMT_VIDEOTOOLBOX` frame, then downloaded
+to CPU NV12 before hardware encoding. This intentionally trades zero-copy handoff
+for lower latency: direct native input buffered roughly four frames on the tested
+M4 Pro, despite FFmpeg's `LOW_DELAY` selecting Apple's real-time encoder.
+Capture-side scaling/letterboxing remains; no CPU swscale pass is needed.
+The converter log explicitly reports `NV12 readback`.
+
+The latest-frame slot can replace an unclaimed frame, and captured surfaces remain
+reference-counted until conversion releases them. There is no direct VideoToolbox dependency; the
+hardware encoder remains FFmpeg's `h264_videotoolbox` / `hevc_videotoolbox`.
+
+Software encoders, custom `--vf` filters, or `--cpu-scale` select the existing
+BGRA capture/copy plus CPU conversion path. Test/file sources also retain the
+existing conversion path. To compare capture-side scaling and BGRA CPU conversion without goggles:
+
+```sh
+target/release/eyepiece-pc --encoder videotoolbox --fps 60 \
+  --no-connect --duration 10 --dump nv12.h264
+target/release/eyepiece-pc --encoder videotoolbox --fps 60 \
+  --cpu-scale --no-connect --duration 10 --dump cpu.h264
+```
+
+On a Mac, verify decoded output dimensions, black bars on a 16:10 or portrait
+display, colors, static-screen forced IDRs (`i`), receiver reconnect, and memory
+usage under encoder load. Linux tests cover layout and converter routing; macOS
+unit tests cover native buffer retention and frame cloning without screen capture.
+Those Apple-only tests and live capture cannot run on Linux.
+
+#### MacBook hardware encoding
+
+Yes: Apple Silicon Macs have H.264/HEVC media engines, exposed through
+`h264_videotoolbox` / `hevc_videotoolbox`. Intel Macs can expose hardware encoders
+through VideoToolbox too, but codec, resolution, low-latency support and availability
+depend on the machine. `--encoder auto` probes **hardware-only VideoToolbox first**
+on macOS, then falls back to x264 (x265 for HEVC). Explicit `--encoder videotoolbox`
+requires hardware by default (`allow_sw=0`), with real-time/speed hints and no
+B-frames. If the device or linked FFmpeg cannot open that encoder, it errors rather
+than silently selecting software. User `--enc-opt` values can override the defaults.
+On macOS `--codec` defaults to HEVC (H.264 elsewhere); VideoToolbox HEVC is limited to
+one reference frame (`max_ref_frames=1`) so the goggles' decoder does not run out of
+frame buffers.
+
+The two primary macOS H.264 pipelines follow the measured live benchmark references:
+VideoToolbox uses capture-side NV12 scaling/letterboxing followed by NV12 readback;
+explicit `--encoder x264` uses BGRA capture/copy and CPU conversion with
+`superfast`/`zerolatency`. Hardware remains the default to preserve CPU headroom;
+x264 is an explicit lower-host-latency option. Both retain the latest-frame mailbox.
+
+Named software encoders are literal: `x264` means `libx264` (H.264 only), and
+`x265` means `libx265` (HEVC only). Incompatible encoder/codec combinations,
+including `--encoder x264 --codec hevc`, report an error instead of silently
+changing encoder. Generic `--encoder software` and `auto` retain codec-appropriate
+software fallback; explicit FFmpeg encoder names are also checked against the codec.
+
+Check the FFmpeg build and run a hardware-only encode without capture or goggles:
+
+```sh
+ffmpeg -hide_banner -encoders | grep videotoolbox
+target/release/eyepiece-pc --source test --encoder videotoolbox --fps 60 \
+  --no-connect --duration 10 --dump mac-hardware.h264 --ffmpeg-log debug
+```
+
+The session log names `h264_videotoolbox` and its `allow_sw=0` option; FFmpeg debug
+logging can also report the selected Apple encoder ID. An encoder appearing in
+`ffmpeg -encoders` alone does not prove the hardware can open it. VideoToolbox uses
+a target bitrate; the existing VBV/slice knobs are driver-managed, not the strict
+CBR/VBV behavior of NVENC. For compatible macOS 13+ hardware, strict CBR can be
+requested with `--enc-opt constant_bit_rate=1`; unsupported encoders reject it.
+
+Capture and hardware encoding have been benchmarked on an M4 Pro; **goggles and
+end-to-end display latency remain untested**. See [encoder benchmarks](docs/encoder-benchmarks.md)
+for results and repeatable commands. The macOS
+CI job builds the Apple-only code and runs non-capture tests; it does not
+validate TCC permissions, live capture, hardware encoding or end-to-end latency.
 
 ## Permissions (Linux KMS capture)
 
@@ -210,7 +343,8 @@ and only the main choices:
 - **Show**: a screen (KMS output, greyed out without the capture permission), a screen or
   window picked through the PipeWire portal, the X11 screen, or a test pattern (Windows:
   the main screen).
-- **Quality**: *Low latency* (H.264, 20 Mbit/s, the default), *High quality* (H.265,
+- **Quality**: *Low latency* (H.264, 20 Mbit/s, the default; on macOS *Balanced*, H.265,
+  20 Mbit/s), *High quality* (H.265,
   30 Mbit/s: sharper, about 1 ms more encode time), *Low bandwidth* (H.265, 8 Mbit/s). They
   set codec and bitrate only; anything else shows as *Custom*.
 - **Head tracking** on/off (to opentrack, off by default) and Recenter; while it is on, a
@@ -292,7 +426,7 @@ Crates (`crates/`), so a UI can be put on top of the library:
 | crate | contents |
 |---|---|
 | `eyepiece-link` | protocol, TCP link (writev, no AU copy), receive thread, windowed min-RTT clock sync, IDR requests, opentrack, stats, adb deploy/forward. No FFmpeg. |
-| `eyepiece-capture` | `Capture` trait + backends: `kms` (libdrm, vblank pacing), `x11` (XShm), `portal` (PipeWire, default feature `pipewire`), `dxgi` (Windows), `pacer` (refresh decimation). No FFmpeg. |
+| `eyepiece-capture` | `Capture` trait + backends: `kms` (libdrm, vblank pacing), `x11` (XShm), `portal` (PipeWire, default feature `pipewire`), `dxgi` (Windows), `screencapturekit` (macOS), `pacer` (refresh decimation). No FFmpeg. |
 | `eyepiece-av` | bindgen FFmpeg bindings, DMA-BUF/CPU → AVFrame wrapping (no copy), GPU converter (libavfilter), encoder presets, Annex-B, test/file sources |
 | `eyepiece-pc` | `session::run(Config, Control, Events)` (library API), `cli` (options → `Config`, adb; shared by both frontends) + the CLI |
 | `eyepiece-gui` | egui/eframe (OpenGL) desktop UI on the `eyepiece-pc` library; in-process preview decoder |
@@ -314,7 +448,7 @@ Latency measures:
 - **Immediate IDR** on (re)connect, when the bridge reports a queue overflow or needs a
   keyframe, when frames are sent but none is shown for 200 ms, and on `i`.
 
-Defaults: H.264 High + CABAC, GOP 2 s, CBR, VBV 4 frames, 4 slices, no B-frames; NVENC
+Defaults: H.264 High + CABAC (macOS: HEVC Main), GOP 2 s, CBR, VBV 4 frames, 4 slices, no B-frames; NVENC
 `p1`/`ull`/zerolatency, VAAPI `async_depth=1`, x264 `superfast`/`zerolatency`, letterboxed
 1920x1080. PC side, 100 fps at 30 Mbit/s: capture→send about 7.5 ms p50 / 8 ms p95 (NVENC).
 End to end with KMS capture, capture→shown on the goggles is about 13–14 ms p50.
@@ -329,6 +463,7 @@ End to end with KMS capture, capture→shown on the goggles is about 13–14 ms 
 | X11 (XShm) | tested; slow for very large roots (use `--region`) |
 | PipeWire portal (default feature `pipewire`, Linux) | builds, not yet run against the goggles |
 | Windows DXGI | builds in CI, **never run**; CPU copy via staging texture |
+| macOS ScreenCaptureKit / VideoToolbox | M4 Pro capture/encoding benchmarked; capture-side NV12 scaling plus low-latency readback; goggles untested |
 | GUI (`eyepiece-gui`) | new; run against the protocol test bridge on Linux, not yet with the goggles; Windows untested |
 
 ## Packaging

@@ -31,7 +31,10 @@ impl Default for UiPrefs {
 /// codec + bitrate; everything else keeps its value. Basis: device A/B runs (H.264 lowest
 /// latency; H.265 about +1 ms PC encode, clearly better picture at the same bitrate).
 pub const PRESETS: &[(&str, &str, &str, &str)] = &[
+    #[cfg(not(target_os = "macos"))]
     ("Low latency", "H.264, 20 Mbit/s (the default): lowest latency", "h264", "20M"),
+    #[cfg(target_os = "macos")]
+    ("Balanced", "H.265, 20 Mbit/s (the default on macOS): VideoToolbox, sharp picture at low latency", "hevc", "20M"),
     ("High quality", "H.265, 30 Mbit/s: sharper picture, about 1 ms more encode time", "hevc", "30M"),
     ("Low bandwidth", "H.265, 8 Mbit/s: for slow links; H.265 keeps more detail at low bitrates", "hevc", "8M"),
 ];
@@ -306,7 +309,12 @@ mod tests {
         let a = Args::try_parse_from([
             "eyepiece-pc",
             "--source",
-            "test",
+            "screencapturekit",
+            "--display-id",
+            "2",
+            "--encoder",
+            "videotoolbox",
+            "--stereo",
             "--bitrate",
             "30M",
             "--head-tracking",

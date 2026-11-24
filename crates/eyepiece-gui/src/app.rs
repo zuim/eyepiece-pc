@@ -83,9 +83,13 @@ const SOURCES: &[(&str, Option<&str>)] = &[
         },
     ),
     ("dxgi", if cfg!(windows) { None } else { Some("Windows only") }),
+    ("screencapturekit", if cfg!(target_os = "macos") { None } else { Some("macOS only") }),
     ("test", None),
     ("file", None),
 ];
+#[cfg(target_os = "macos")]
+const ENCODERS: &[&str] = &["auto", "videotoolbox", "x264"];
+#[cfg(not(target_os = "macos"))]
 const ENCODERS: &[&str] = &["auto", "nvenc", "vaapi", "amf", "qsv", "x264"];
 const BITRATES: &[&str] = &["10M", "15M", "20M", "30M", "40M", "50M"];
 
@@ -467,6 +471,11 @@ impl App {
                 "dxgi" => {
                     ui.label("Adapter,output");
                     ui.text_edit_singleline(&mut a.dxgi);
+                    ui.end_row();
+                }
+                "screencapturekit" => {
+                    ui.label("Display ID");
+                    opt_num(ui, &mut a.display_id).on_hover_text("leave empty to use the first available display");
                     ui.end_row();
                 }
                 _ => {}
@@ -888,7 +897,8 @@ impl App {
             row(ui, "file input", |ui| opt_text(ui, &mut a.input, "media file"));
             row(ui, "test lavfi graph", |ui| opt_text(ui, &mut a.lavfi, "testsrc2"));
             row(ui, "pipewire restore token", |ui| opt_path(ui, &mut a.restore_token, "file"));
-            row(ui, "pipewire cursor", |ui| ui.checkbox(&mut a.cursor, "--cursor"));
+            row(ui, "cursor", |ui| ui.checkbox(&mut a.cursor, "--cursor").on_hover_text("PipeWire or ScreenCaptureKit"));
+            row(ui, "macOS display ID", |ui| opt_num(ui, &mut a.display_id));
             row(ui, "dxgi adapter,output", |ui| ui.text_edit_singleline(&mut a.dxgi));
             row(ui, "kms simulate (test aid)", |ui| ui.checkbox(&mut a.kms_simulate, "--kms-simulate"));
         });

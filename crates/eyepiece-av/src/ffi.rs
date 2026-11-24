@@ -15,7 +15,7 @@ pub const AVERROR_EOF_: i32 = fferrtag(b'E', b'O', b'F', b' ');
 pub const EAGAIN_: i32 = averror(libc::EAGAIN);
 
 pub fn err_str(e: i32) -> String {
-    let mut buf = [0i8; 256];
+    let mut buf = [0 as std::ffi::c_char; 256];
     unsafe { av_strerror(e, buf.as_mut_ptr(), buf.len()) };
     unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned()
 }

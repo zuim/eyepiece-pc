@@ -1,6 +1,6 @@
 [package]
 name = "eyepiece-capture"
-description = "Screen capture backends for Eyepiece: KMS/DRM, X11 (XShm), PipeWire portal, Windows DXGI"
+description = "Screen capture backends for Eyepiece: KMS/DRM, X11, PipeWire, Windows DXGI, macOS ScreenCaptureKit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -20,6 +20,9 @@ x11rb = { version = "0.13", features = ["shm"], optional = true }
 pipewire = { version = "0.9", optional = true, features = ["v0_3_33"] }
 ashpd = { version = "0.12", optional = true, default-features = false, features = ["async-std"] }
 pollster = { version = "0.4", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = "11.1.2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

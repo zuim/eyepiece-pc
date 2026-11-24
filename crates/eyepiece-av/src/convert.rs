@@ -20,6 +20,7 @@ const SWS_THREADS: u32 = 4;
 pub enum Target {
     /// VAAPI surfaces (NV12) for *_vaapi encoders
     Vaapi,
+    VideoToolbox,
     /// system-memory NV12 (nvenc, libx264, amf, qsv)
     Nv12,
     /// system-memory yuv420p (libx265)
@@ -79,12 +80,23 @@ fn hw_key(f: &Frame) -> usize {
 impl Converter {
     pub fn new(cfg: ConvertConfig, fps: u32) -> Converter {
         let filter_download = std::env::var_os("EYEPIECE_FILTER_DOWNLOAD").is_some();
-        Converter { cfg, fps: fps as i32, vaapi: None, graph: None, description: String::new(), filter_download, dl: None }
+        Converter {
+            cfg,
+            fps: fps as i32,
+            vaapi: None,
+            graph: None,
+            description: String::new(),
+            filter_download,
+            dl: None,
+        }
     }
 
     fn vaapi(&mut self) -> Result<BufRef, String> {
         if self.vaapi.is_none() {
-            self.vaapi = Some(crate::hw::hwdevice(AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI, Some(&self.cfg.vaapi_device))?);
+            self.vaapi = Some(crate::hw::hwdevice(
+                AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI,
+                Some(&self.cfg.vaapi_device),
+            )?);
         }
         Ok(self.vaapi.clone().unwrap())
     }
@@ -108,7 +120,9 @@ impl Converter {
                  scale_vaapi=format=nv12:out_color_matrix=bt709:out_range=tv"
             )
         } else {
-            format!("scale_vaapi=w={w}:h={h}:mode={m}:format=nv12:out_color_matrix=bt709:out_range=tv")
+            format!(
+                "scale_vaapi=w={w}:h={h}:mode={m}:format=nv12:out_color_matrix=bt709:out_range=tv"
+            )
         };
         if let Some(x) = &self.cfg.extra_vf {
             s = format!("{s},{x}");
@@ -116,15 +130,19 @@ impl Converter {
         match self.cfg.target {
             Target::Vaapi => s,
             // downloaded by `download()` (mapped + streaming-load copy), see below
-            Target::Nv12 if !self.filter_download => s,
-            Target::Nv12 => s + ",hwdownload,format=nv12",
+            Target::Nv12 | Target::VideoToolbox if !self.filter_download => s,
+            Target::Nv12 | Target::VideoToolbox => s + ",hwdownload,format=nv12",
             Target::Yuv420p => s + ",hwdownload,format=nv12,format=yuv420p",
         }
     }
 
     fn cpu_chain(&self) -> String {
         let (w, h) = (self.cfg.width, self.cfg.height);
-        let fmt = if self.cfg.target == Target::Yuv420p { "yuv420p" } else { "nv12" };
+        let fmt = if self.cfg.target == Target::Yuv420p {
+            "yuv420p"
+        } else {
+            "nv12"
+        };
         let mut s = if self.cfg.letterbox {
             format!(
                 "scale=w={w}:h={h}:flags=bicubic:threads={SWS_THREADS}:force_original_aspect_ratio=decrease:force_divisible_by=2:\
@@ -148,9 +166,14 @@ impl Converter {
         let hw_in = unsafe { (*f.0).hw_frames_ctx };
         let is_drm = fmt == AVPixelFormat::AV_PIX_FMT_DRM_PRIME as i32;
         let chain = if is_drm {
-            format!("hwmap=derive_device=vaapi:mode=read,{}", self.vaapi_chain(w, h))
+            format!(
+                "hwmap=derive_device=vaapi:mode=read,{}",
+                self.vaapi_chain(w, h)
+            )
         } else if self.cfg.target == Target::Vaapi
-            || (self.cfg.gpu_scale_cpu_input && (w as u32, h as u32) != (self.cfg.width, self.cfg.height))
+            || (cfg!(target_os = "linux")
+                && self.cfg.gpu_scale_cpu_input
+                && (w as u32, h as u32) != (self.cfg.width, self.cfg.height))
         {
             // GPU scaling pays off only when there is something to scale
             format!("hwupload,{}", self.vaapi_chain(w, h))
@@ -163,10 +186,19 @@ impl Converter {
             if graph.is_null() {
                 return Err("avfilter_graph_alloc".into());
             }
-            let mut g = Graph { graph, src: ptr::null_mut(), sink: ptr::null_mut(), key: (w, h, fmt, hw_key(f)) };
+            let mut g = Graph {
+                graph,
+                src: ptr::null_mut(),
+                sink: ptr::null_mut(),
+                key: (w, h, fmt, hw_key(f)),
+            };
             (*graph).nb_threads = 4;
             // buffersrc: parameters (incl. the hw frames context) before init
-            g.src = avfilter_graph_alloc_filter(graph, avfilter_get_by_name(cstr("buffer").as_ptr()), cstr("in").as_ptr());
+            g.src = avfilter_graph_alloc_filter(
+                graph,
+                avfilter_get_by_name(cstr("buffer").as_ptr()),
+                cstr("in").as_ptr(),
+            );
             if g.src.is_null() {
                 return Err("buffersrc alloc".into());
             }
@@ -174,7 +206,10 @@ impl Converter {
             (*par).format = fmt;
             (*par).width = w;
             (*par).height = h;
-            (*par).time_base = AVRational { num: 1, den: self.fps };
+            (*par).time_base = AVRational {
+                num: 1,
+                den: self.fps,
+            };
             (*par).sample_aspect_ratio = AVRational { num: 1, den: 1 };
             (*par).hw_frames_ctx = hw_in; // borrowed: parameters_set takes its own ref
             let r = av_buffersrc_parameters_set(g.src, par);
@@ -197,7 +232,11 @@ impl Converter {
             // segment API: filters are created first, so hwupload/hwmap can get the device
             // before their init runs
             let mut seg: *mut AVFilterGraphSegment = ptr::null_mut();
-            let dev = if needs_device { Some(self.vaapi()?) } else { None };
+            let dev = if needs_device {
+                Some(self.vaapi()?)
+            } else {
+                None
+            };
             let mut r = avfilter_graph_segment_parse(graph, cstr(&chain).as_ptr(), 0, &mut seg);
             if r >= 0 {
                 r = avfilter_graph_segment_create_filters(seg, 0);
@@ -227,7 +266,10 @@ impl Converter {
             avfilter_inout_free(&mut inputs);
             avfilter_inout_free(&mut outputs);
             check(r, &format!("filter graph '{chain}'"))?;
-            check(avfilter_graph_config(graph, ptr::null_mut()), &format!("configure '{chain}'"))?;
+            check(
+                avfilter_graph_config(graph, ptr::null_mut()),
+                &format!("configure '{chain}'"),
+            )?;
             self.description = format!("{w}x{h} {} → {chain}", pix_fmt_name(fmt));
             Ok(g)
         }
@@ -235,6 +277,29 @@ impl Converter {
 
     /// Convert one frame (consumed). Returns the encoder-ready frame.
     pub fn convert(&mut self, f: Frame) -> Result<Option<Frame>, String> {
+        if f.format() == AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX as i32 {
+            if self.cfg.target != Target::VideoToolbox
+                || self.cfg.extra_vf.is_some()
+                || (f.width() as u32, f.height() as u32) != (self.cfg.width, self.cfg.height)
+            {
+                return Err("Native VideoToolbox surfaces require matching output size, a VideoToolbox encoder, and no --vf; use CPU capture for custom conversion".into());
+            }
+            self.graph = None;
+            let out = Frame::alloc();
+            unsafe {
+                check(
+                    av_hwframe_transfer_data(out.0, f.0, 0),
+                    "VideoToolbox NV12 download",
+                )?;
+                check(
+                    av_frame_copy_props(out.0, f.0),
+                    "VideoToolbox frame properties",
+                )?;
+            }
+            self.description =
+                "ScreenCaptureKit-scaled NV12 readback (avoids native encoder buffering)".into();
+            return Ok(Some(out));
+        }
         let key = (f.width(), f.height(), f.format(), hw_key(&f));
         // a new hw frames context (capture recreated it) also needs a new graph; the old
         // one stays referenced by the old buffersrc, so its address can't be reused
@@ -254,7 +319,9 @@ impl Converter {
                 return Ok(None);
             }
             check(r, "buffersink get")?;
-            if out.format() == AVPixelFormat::AV_PIX_FMT_VAAPI as i32 && self.cfg.target != Target::Vaapi {
+            if out.format() == AVPixelFormat::AV_PIX_FMT_VAAPI as i32
+                && self.cfg.target != Target::Vaapi
+            {
                 let (w, h) = (self.cfg.width as i32, self.cfg.height as i32);
                 if self.dl.as_ref().map_or(true, |d| (d.w, d.h) != (w, h)) {
                     self.dl = Some(Download::new(w, h)?);
@@ -313,7 +380,9 @@ impl Download {
         let y_size = stride as usize * h as usize;
         let size = y_size + stride as usize * (h as usize / 2) + 64;
         let info = Box::into_raw(Box::new(PoolInfo { y_size }));
-        let pool = unsafe { av_buffer_pool_init2(size, info as *mut _, Some(pool_alloc), Some(pool_free)) };
+        let pool = unsafe {
+            av_buffer_pool_init2(size, info as *mut _, Some(pool_alloc), Some(pool_free))
+        };
         if pool.is_null() {
             return Err("av_buffer_pool_init2".into());
         }
@@ -324,7 +393,10 @@ impl Download {
         unsafe {
             let m = Frame::alloc();
             (*m.0).format = AVPixelFormat::AV_PIX_FMT_NV12 as i32;
-            check(av_hwframe_map(m.0, hw.0, AV_HWFRAME_MAP_READ as i32), "map VAAPI surface")?;
+            check(
+                av_hwframe_map(m.0, hw.0, AV_HWFRAME_MAP_READ as i32),
+                "map VAAPI surface",
+            )?;
             let (pw, ph) = (hw.width().min(self.w), hw.height().min(self.h));
             let (x, y) = (((self.w - pw) / 2) & !1, ((self.h - ph) / 2) & !1);
             let buf = av_buffer_pool_get(self.pool);
@@ -351,7 +423,15 @@ impl Download {
             let dl: [isize; 4] = [self.stride as isize, self.stride as isize, 0, 0];
             let sl: [isize; 4] = std::array::from_fn(|i| (*m.0).linesize[i] as isize);
             let sd: [*const u8; 4] = std::array::from_fn(|i| (*m.0).data[i] as *const u8);
-            av_image_copy_uc_from(dst.as_ptr(), dl.as_ptr(), sd.as_ptr(), sl.as_ptr(), AVPixelFormat::AV_PIX_FMT_NV12, pw, ph);
+            av_image_copy_uc_from(
+                dst.as_ptr(),
+                dl.as_ptr(),
+                sd.as_ptr(),
+                sl.as_ptr(),
+                AVPixelFormat::AV_PIX_FMT_NV12,
+                pw,
+                ph,
+            );
             av_frame_copy_props(out.0, hw.0);
             o.color_range = AVColorRange::AVCOL_RANGE_MPEG;
             o.colorspace = AVColorSpace::AVCOL_SPC_BT709;
@@ -363,5 +443,131 @@ impl Download {
 impl Drop for Download {
     fn drop(&mut self) {
         unsafe { av_buffer_pool_uninit(&mut self.pool) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> ConvertConfig {
+        ConvertConfig {
+            width: 64,
+            height: 32,
+            letterbox: true,
+            target: Target::VideoToolbox,
+            vaapi_device: String::new(),
+            gpu_scale_cpu_input: false,
+            extra_vf: None,
+            scale_mode: "hq".into(),
+        }
+    }
+
+    fn native_frame() -> Frame {
+        let frame = Frame::alloc();
+        unsafe {
+            (*frame.0).width = 64;
+            (*frame.0).height = 32;
+            (*frame.0).format = AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX as i32;
+        }
+        frame
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_surface_downloads_nv12_without_a_filter_graph() {
+        use eyepiece_capture::screencapturekit::CVPixelBuffer;
+        let mut converter = Converter::new(config(), 60);
+        let pixels = CVPixelBuffer::create(64, 32, u32::from_be_bytes(*b"420v")).unwrap();
+        let mut frames = crate::hw::VideoToolboxFrames::new().unwrap();
+        let frame = frames.wrap(pixels).unwrap();
+        let input = cpu_frame();
+        unsafe {
+            check(
+                av_hwframe_transfer_data(frame.0, input.0, 0),
+                "upload test pixels",
+            )
+            .unwrap();
+        }
+        let result = converter.convert(frame).unwrap().unwrap();
+        assert_eq!(result.format(), AVPixelFormat::AV_PIX_FMT_NV12 as i32);
+        assert_eq!((result.width(), result.height()), (64, 32));
+        unsafe {
+            assert!((*result.0).hw_frames_ctx.is_null());
+            assert_eq!(*(*result.0).data[0], 16);
+            assert_eq!(*(*result.0).data[1], 128);
+            assert_eq!((*result.0).color_range, AVColorRange::AVCOL_RANGE_MPEG);
+        }
+        assert!(converter.graph.is_none());
+        assert!(converter.description.contains("readback"));
+    }
+
+    #[test]
+    fn incompatible_native_conversion_is_rejected() {
+        let mut mismatched = config();
+        mismatched.width = 128;
+        let mut filtered = config();
+        filtered.extra_vf = Some("hflip".into());
+        let mut software = config();
+        software.target = Target::Nv12;
+        for settings in [mismatched, filtered, software] {
+            assert!(Converter::new(settings, 60)
+                .convert(native_frame())
+                .is_err());
+        }
+    }
+
+    fn cpu_frame() -> Frame {
+        let frame = Frame::alloc();
+        unsafe {
+            (*frame.0).width = 64;
+            (*frame.0).height = 32;
+            (*frame.0).format = AVPixelFormat::AV_PIX_FMT_NV12 as i32;
+            check(av_frame_get_buffer(frame.0, 32), "allocate test frame").unwrap();
+            std::ptr::write_bytes((*frame.0).data[0], 16, (*frame.0).linesize[0] as usize * 32);
+            std::ptr::write_bytes(
+                (*frame.0).data[1],
+                128,
+                (*frame.0).linesize[1] as usize * 16,
+            );
+        }
+        frame
+    }
+
+    #[test]
+    fn x264_bgra_input_uses_benchmark_cpu_conversion() {
+        let frame = Frame::alloc();
+        unsafe {
+            (*frame.0).width = 96;
+            (*frame.0).height = 64;
+            (*frame.0).format = AVPixelFormat::AV_PIX_FMT_BGR0 as i32;
+            check(av_frame_get_buffer(frame.0, 32), "allocate BGRA test frame").unwrap();
+            std::ptr::write_bytes((*frame.0).data[0], 0, (*frame.0).linesize[0] as usize * 64);
+        }
+        let mut settings = config();
+        settings.target = Target::Nv12;
+        let mut converter = Converter::new(settings, 60);
+        let output = converter.convert(frame).unwrap().unwrap();
+        assert_eq!(output.format(), AVPixelFormat::AV_PIX_FMT_NV12 as i32);
+        assert_eq!((output.width(), output.height()), (64, 32));
+        assert!(unsafe { (*output.0).hw_frames_ctx.is_null() });
+        assert!(converter.description.contains("bgr0"));
+        assert!(converter
+            .description
+            .contains(&format!("flags=bicubic:threads={SWS_THREADS}")));
+        assert!(converter
+            .description
+            .contains("out_color_matrix=bt709:out_range=tv"));
+        assert!(converter.description.contains("pad=w=64:h=32"));
+        assert!(converter.description.ends_with("format=nv12"));
+    }
+
+    #[test]
+    fn cpu_input_remains_supported_for_videotoolbox_encoding() {
+        let mut converter = Converter::new(config(), 60);
+        let result = converter.convert(cpu_frame()).unwrap().unwrap();
+        assert_eq!(result.format(), AVPixelFormat::AV_PIX_FMT_NV12 as i32);
+        assert_eq!((result.width(), result.height()), (64, 32));
+        assert!(unsafe { (*result.0).hw_frames_ctx.is_null() });
     }
 }
