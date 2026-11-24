@@ -7,12 +7,12 @@ to the PC Display bridge (`pcdisplay_bridge`) on the goggles. The goggles' head 
 forwarded to [opentrack](https://github.com/opentrack/opentrack), so games with head-tracking
 support can use it. `eyepiece-gui` is a desktop UI for the same engine (see [GUI](#gui)).
 
-The goggles side is the **PC Display** mod of [eyepiece](https://github.com/zuim/eyepiece), the
+The goggles side is the **PC Display** mod of [tinkerglass](https://github.com/tinkerglass-org/tinkerglass), the
 Goggles 3 mod platform: it adds "PC Display" to the goggles' More menu, which starts
-`pcdisplay_bridge`, and eyepiece's display service (`core.display`) hides the menu while the
-stream is on the screen. The wire protocol is defined in eyepiece
+`pcdisplay_bridge`, and tinkerglass's display service (`core.display`) hides the menu while the
+stream is on the screen. The wire protocol is defined in tinkerglass
 `mods/pcdisplay/protocol.json`; `crates/eyepiece-link/src/proto_gen.rs` is generated from it
-(eyepiece: `./ep gen --pc=<this checkout>`) and must not be edited here.
+(tinkerglass: `./tg build --pc=<this checkout>`) and must not be edited here.
 
 ```
  KMS plane / PipeWire / X11 / DXGI ──► convert (GPU: scale, letterbox, NV12) ──► encode (NVENC/VAAPI/…)
@@ -43,7 +43,7 @@ Download from the GitHub releases page:
   ad-hoc signed, **not Developer ID signed or notarized**, so Gatekeeper can
   block it until the user explicitly approves it in System Settings.
 
-You also need `adb` (Android platform-tools) and the goggles with eyepiece and its PC Display
+You also need `adb` (Android platform-tools) and the goggles with tinkerglass and its PC Display
 mod installed. eyepiece-pc starts the bridge installed with the mod by itself.
 On macOS, Finder-launched apps may not inherit Homebrew's PATH: set the full path
 to `adb` in the GUI's Advanced settings (typically `/opt/homebrew/bin/adb`).
@@ -233,7 +233,7 @@ plugin code). `--source pipewire` and `--source x11` need no privileges.
 
 ## Usage
 
-Connect the goggles by USB and enable ADB (eyepiece's web app, or `ep connect`), then:
+Connect the goggles by USB and enable ADB (tinkerglass's web app, or `tg connect`), then:
 
 ```sh
 eyepiece-pc --list                                  # outputs, planes, framebuffer formats
@@ -251,11 +251,11 @@ eyepiece-pc --no-deploy                             # use the bridge started fro
 By default eyepiece-pc starts the bridge itself (no need to open PC Display in the goggles'
 menu first; a bridge started there is replaced). It is the one installed with PC Display,
 started with the menu's environment and `-1 -b` (exits with the PC session); its log is
-`/data/vendor/eyepiece/run/pcdisplay/bridge.log` on the goggles. The eyepiece mods must be
+`/data/vendor/tinkerglass/run/pcdisplay/bridge.log` on the goggles. The tinkerglass mods must be
 running: without them the bridge can't hide the goggles' menu and shows no picture.
-`--no-deploy` uses a bridge that is already running (More → PC Display). The eyepiece mods
+`--no-deploy` uses a bridge that is already running (More → PC Display). The tinkerglass mods
 must be running, since they hide the goggles' menu for the stream; a bridge started over ADB
-can reach them only while the session is SELinux-permissive, which `ep connect` and the web
+can reach them only while the session is SELinux-permissive, which `tg connect` and the web
 app set up. eyepiece-pc warns when the menu could not be hidden.
 
 ### Resolution
@@ -317,7 +317,7 @@ when the PC side is connected, otherwise over `adb forward` and says so:
 2560x720; the goggles switch to their 3D display mode for the session (1280x720 per eye,
 ~60 Hz — the panel's only 3D mode, as used by the goggles' own 3D video player) and back to
 2D when it ends. `eyepiece-pc --stereo --source test` shows a stereo test pattern (right eye
-mirrored). Needs eyepiece's PC Display.
+mirrored). Needs tinkerglass's PC Display.
 Feeding it from VR apps (a VR runtime's compositor window as the source, head pose from
 `--head-tracking`) is work in progress.
 
@@ -403,7 +403,7 @@ Head tracking is **off by default**: the goggles' IMU stream only runs while a P
 `--head-tracking` turns it on (`--no-video` and `--print-pose` imply it); the bridge stops it
 again when the PC disconnects. `eyepiece-pc` then sends the goggles' yaw/pitch/roll (degrees;
 +yaw right, +pitch up, +roll right ear down) to opentrack's **"UDP over network"** input on
-`127.0.0.1:4242` (`--opentrack HOST:PORT`, `--opentrack ''` = off). Needs eyepiece's PC Display.
+`127.0.0.1:4242` (`--opentrack HOST:PORT`, `--opentrack ''` = off). Needs tinkerglass's PC Display.
 
 In opentrack: *Input* = "UDP over network", port 4242. Set a centre key in opentrack, and use
 `r` in eyepiece-pc to recenter the goggles' yaw. Then pick the output for your game:
