@@ -3,7 +3,8 @@
 //! display (DRM vblank, PipeWire buffer arrival, DXGI present time), not when we got
 //! around to reading it.
 //!
-//! Frames are either GPU buffers (DMA-BUF, zero-copy into VAAPI) or CPU images.
+//! Frames are GPU buffers (DMA-BUF into VAAPI, native macOS pixel buffers into
+//! VideoToolbox) or CPU images.
 //! No backend queues frames: `next_frame` always returns the newest content.
 
 #[cfg(target_os = "linux")]
@@ -16,10 +17,13 @@ pub mod portal;
 pub mod x11;
 #[cfg(windows)]
 pub mod dxgi;
+#[cfg(target_os = "macos")]
+pub mod screencapturekit;
 
 pub mod pacer;
+pub mod layout;
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::os::fd::OwnedFd;
 
 /// fourcc helper (DRM_FORMAT_*).
@@ -55,7 +59,7 @@ pub fn opaque_fourcc(f: u32) -> u32 {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct DmaObject {
     pub fd: OwnedFd,
@@ -70,7 +74,7 @@ pub struct DmaPlane {
 }
 
 /// A GPU buffer shared as DMA-BUF (KMS framebuffer, PipeWire dmabuf).
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct DmaBuf {
     pub width: u32,
@@ -106,8 +110,10 @@ pub struct CpuImage {
 
 #[derive(Debug)]
 pub enum FrameData {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     DmaBuf(DmaBuf),
+    #[cfg(target_os = "macos")]
+    PixelBuffer(screencapturekit::CVPixelBuffer),
     Cpu(CpuImage),
 }
 
@@ -124,8 +130,10 @@ pub struct Frame {
 impl Frame {
     pub fn size(&self) -> (u32, u32) {
         match &self.data {
-            #[cfg(unix)]
+            #[cfg(target_os = "linux")]
             FrameData::DmaBuf(d) => (d.width, d.height),
+            #[cfg(target_os = "macos")]
+            FrameData::PixelBuffer(pixels) => (pixels.width() as u32, pixels.height() as u32),
             FrameData::Cpu(c) => (c.width, c.height),
         }
     }

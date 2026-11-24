@@ -6,7 +6,9 @@
 #include <libavutil/avutil.h>
 #include <libavutil/error.h>
 #include <libavutil/hwcontext.h>
+#ifdef __linux__
 #include <libavutil/hwcontext_drm.h>
+#endif
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>

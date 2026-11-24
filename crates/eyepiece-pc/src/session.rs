@@ -35,6 +35,8 @@ pub enum SourceKind {
     PipeWire { restore_token_file: Option<PathBuf>, cursor: bool },
     #[cfg(windows)]
     Dxgi { adapter: u32, output: u32 },
+    #[cfg(target_os = "macos")]
+    ScreenCaptureKit { display_id: Option<u32>, cursor: bool },
     Test { lavfi: Option<String> },
     File { path: String },
 }
@@ -118,7 +120,7 @@ impl Events {
     }
 }
 
-fn make_source(cfg: &Config) -> Result<Box<dyn Source>, String> {
+fn make_source(cfg: &Config, _encoder_family: encoder::Family) -> Result<Box<dyn Source>, String> {
     let fps = cfg.enc.fps as f64;
     Ok(match &cfg.source {
         #[cfg(target_os = "linux")]
@@ -161,6 +163,17 @@ fn make_source(cfg: &Config) -> Result<Box<dyn Source>, String> {
         SourceKind::Dxgi { adapter, output } => {
             let d = eyepiece_capture::dxgi::DxgiCapture::open(*adapter, *output, fps)?;
             Box::new(eyepiece_av::CaptureSource::new(Box::new(d), ""))
+        }
+        #[cfg(target_os = "macos")]
+        SourceKind::ScreenCaptureKit { display_id, cursor } => {
+            let capture = if _encoder_family == encoder::Family::VideoToolbox && cfg.vf.is_none() && cfg.gpu_scale_cpu_input {
+                eyepiece_capture::screencapturekit::ScreenCapture::open_native(
+                    *display_id, cfg.enc.fps, *cursor, cfg.frame_size(), cfg.letterbox,
+                )?
+            } else {
+                eyepiece_capture::screencapturekit::ScreenCapture::open(*display_id, cfg.enc.fps, *cursor)?
+            };
+            Box::new(eyepiece_av::CaptureSource::new(Box::new(capture), ""))
         }
         SourceKind::Test { lavfi } => {
             let (w, h) = cfg.frame_size();
@@ -216,8 +229,11 @@ pub fn run(mut cfg: Config, ctl: Arc<Control>, ev: Events) -> Result<(), String>
     let log = ev.log.clone();
     let pc_stats = Arc::new(Mutex::new(Interval::default()));
 
+    let enc_name = if cfg.video { encoder::resolve(&cfg.enc.encoder, cfg.enc.codec, &cfg.enc.vaapi_device)? } else { String::new() };
+    let family = encoder::family(&enc_name);
+
     // ---- source first: its refresh rate decides the real frame rate ----
-    let mut src = if cfg.video { Some(make_source(&cfg)?) } else { None };
+    let mut src = if cfg.video { Some(make_source(&cfg, family)?) } else { None };
     if let Some(s) = &src {
         log(format!("source: {}", s.describe()));
         if let Some(r) = s.refresh_hz() {
@@ -233,9 +249,6 @@ pub fn run(mut cfg: Config, ctl: Arc<Control>, ev: Events) -> Result<(), String>
             }
         }
     }
-    let enc_name = if cfg.video { encoder::resolve(&cfg.enc.encoder, cfg.enc.codec, &cfg.enc.vaapi_device)? } else { String::new() };
-    let family = encoder::family(&enc_name);
-
     let link: Arc<Mutex<Option<Arc<Link>>>> = Arc::new(Mutex::new(connect(&cfg, &cfg.enc, &ev)?));
 
     // ---- stats thread ----

@@ -6,7 +6,6 @@
 use crate::annexb;
 use crate::convert::Target;
 use crate::ffi::*;
-use std::ptr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Codec {
@@ -38,6 +37,7 @@ pub enum Family {
     Vaapi,
     Amf,
     Qsv,
+    VideoToolbox,
     X264,
     X265,
     Other,
@@ -46,7 +46,7 @@ pub enum Family {
 #[derive(Debug, Clone)]
 pub struct EncoderConfig {
     pub codec: Codec,
-    /// auto | nvenc | vaapi | amf | qsv | x264 (software) | any FFmpeg encoder name
+    /// auto | nvenc | vaapi | amf | qsv | videotoolbox | x264 | any FFmpeg encoder name
     pub encoder: String,
     pub fps: u32,
     pub bitrate: u64,
@@ -72,7 +72,15 @@ pub fn encoder_name(alias: &str, codec: Codec) -> String {
         "vaapi" => if h { "h264_vaapi" } else { "hevc_vaapi" }.into(),
         "amf" => if h { "h264_amf" } else { "hevc_amf" }.into(),
         "qsv" => if h { "h264_qsv" } else { "hevc_qsv" }.into(),
-        "x264" | "x265" | "sw" | "software" => if h { "libx264" } else { "libx265" }.into(),
+        "videotoolbox" | "vt" => if h {
+            "h264_videotoolbox"
+        } else {
+            "hevc_videotoolbox"
+        }
+        .into(),
+        "x264" => "libx264".into(),
+        "x265" => "libx265".into(),
+        "sw" | "software" => if h { "libx264" } else { "libx265" }.into(),
         other => other.into(),
     }
 }
@@ -86,6 +94,8 @@ pub fn family(name: &str) -> Family {
         Family::Amf
     } else if name.ends_with("_qsv") {
         Family::Qsv
+    } else if name.ends_with("_videotoolbox") {
+        Family::VideoToolbox
     } else if name == "libx264" {
         Family::X264
     } else if name == "libx265" {
@@ -98,6 +108,7 @@ pub fn family(name: &str) -> Family {
 pub fn target_for(f: Family) -> Target {
     match f {
         Family::Vaapi => Target::Vaapi,
+        Family::VideoToolbox => Target::VideoToolbox,
         Family::X265 => Target::Yuv420p,
         _ => Target::Nv12,
     }
@@ -114,10 +125,15 @@ pub fn probe(name: &str, vaapi_device: &str) -> bool {
         return false;
     }
     match family(name) {
-        Family::Vaapi => crate::hw::hwdevice(AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI, Some(vaapi_device)).is_ok(),
+        Family::Vaapi => {
+            crate::hw::hwdevice(AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI, Some(vaapi_device)).is_ok()
+        }
         _ => unsafe {
             let c = avcodec_find_encoder_by_name(cstr(name).as_ptr());
             let ctx = avcodec_alloc_context3(c);
+            if ctx.is_null() {
+                return false;
+            }
             (*ctx).width = 640;
             (*ctx).height = 480;
             (*ctx).pix_fmt = AVPixelFormat::AV_PIX_FMT_NV12;
@@ -125,7 +141,12 @@ pub fn probe(name: &str, vaapi_device: &str) -> bool {
             (*ctx).framerate = AVRational { num: 60, den: 1 };
             let prev = av_log_get_level();
             av_log_set_level(AV_LOG_QUIET as i32);
-            let ok = avcodec_open2(ctx, c, ptr::null_mut()) >= 0;
+            let mut opts = Dict::new();
+            if family(name) == Family::VideoToolbox {
+                opts.set("allow_sw", "0");
+                opts.set("realtime", "1");
+            }
+            let ok = avcodec_open2(ctx, c, &mut opts.0) >= 0;
             av_log_set_level(prev);
             let mut ctx = ctx;
             avcodec_free_context(&mut ctx);
@@ -134,16 +155,31 @@ pub fn probe(name: &str, vaapi_device: &str) -> bool {
     }
 }
 
-/// "auto": first that works of NVENC, VAAPI, AMF, QSV, then software.
+#[cfg(target_os = "macos")]
+const AUTO_ENCODERS: &[&str] = &["videotoolbox", "software"];
+#[cfg(not(target_os = "macos"))]
+const AUTO_ENCODERS: &[&str] = &["nvenc", "vaapi", "amf", "qsv", "software"];
+
+/// "auto": VideoToolbox on macOS; NVENC, VAAPI, AMF, QSV elsewhere; then software.
 pub fn resolve(alias: &str, codec: Codec, vaapi_device: &str) -> Result<String, String> {
     if alias != "auto" {
         let n = encoder_name(alias, codec);
-        if !exists(&n) {
+        let encoder = unsafe { avcodec_find_encoder_by_name(cstr(&n).as_ptr()) };
+        if encoder.is_null() {
             return Err(format!("encoder {n} not in this FFmpeg build"));
+        }
+        let expected = match codec {
+            Codec::H264 => AVCodecID::AV_CODEC_ID_H264,
+            Codec::Hevc => AVCodecID::AV_CODEC_ID_HEVC,
+        };
+        if unsafe { (*encoder).id } != expected {
+            return Err(format!(
+                "encoder {n} does not encode {codec:?}; choose a matching encoder or codec"
+            ));
         }
         return Ok(n);
     }
-    for a in ["nvenc", "vaapi", "amf", "qsv", "x264"] {
+    for a in AUTO_ENCODERS {
         let n = encoder_name(a, codec);
         if probe(&n, vaapi_device) {
             return Ok(n);
@@ -228,6 +264,19 @@ fn default_opts(f: Family, c: &EncoderConfig) -> Vec<(String, String)> {
                 o.push(("profile", "high".into()));
             }
         }
+        Family::VideoToolbox => {
+            o.push(("allow_sw", "0".into()));
+            o.push(("realtime", "1".into()));
+            o.push(("prio_speed", "1".into()));
+            if h264 {
+                o.push(("profile", "high".into()));
+            } else {
+                // VT HEVC otherwise derives the DPB from the level (up to 6 refs), which exhausts
+                // the goggles' VC8000D frame buffers and stalls the decoder. Not for H.264:
+                // there VT then emits near-intra frames.
+                o.push(("max_ref_frames", "1".into()));
+            }
+        }
         Family::X264 => {
             // superfast = fastest preset that keeps CABAC; zerolatency = sliced threads,
             // no lookahead, no B-frames
@@ -272,12 +321,17 @@ fn default_opts(f: Family, c: &EncoderConfig) -> Vec<(String, String)> {
 
 impl Encoder {
     /// Open for frames like `first` (format/size); `hw_frames`: the converter's output
-    /// frames context for VAAPI.
+    /// frames context for VAAPI or VideoToolbox.
     ///
     /// # Safety
     /// `hw_frames` must be null or a valid `AVBufferRef` for the duration of the call
     /// (the encoder takes its own reference).
-    pub unsafe fn open(cfg: &EncoderConfig, name: &str, first: &Frame, hw_frames: *mut AVBufferRef) -> Result<Encoder, String> {
+    pub unsafe fn open(
+        cfg: &EncoderConfig,
+        name: &str,
+        first: &Frame,
+        hw_frames: *mut AVBufferRef,
+    ) -> Result<Encoder, String> {
         let fam = family(name);
         unsafe {
             let codec = avcodec_find_encoder_by_name(cstr(name).as_ptr());
@@ -290,16 +344,26 @@ impl Encoder {
             c.height = first.height();
             c.pix_fmt = std::mem::transmute::<i32, AVPixelFormat>(first.format());
             c.sample_aspect_ratio = AVRational { num: 1, den: 1 };
-            c.time_base = AVRational { num: 1, den: cfg.fps as i32 };
-            c.framerate = AVRational { num: cfg.fps as i32, den: 1 };
+            c.time_base = AVRational {
+                num: 1,
+                den: cfg.fps as i32,
+            };
+            c.framerate = AVRational {
+                num: cfg.fps as i32,
+                den: 1,
+            };
             c.bit_rate = cfg.bitrate as i64;
             c.rc_max_rate = cfg.bitrate as i64;
-            c.rc_min_rate = if matches!(fam, Family::Nvenc | Family::Vaapi | Family::Qsv | Family::Amf) {
+            c.rc_min_rate = if matches!(
+                fam,
+                Family::Nvenc | Family::Vaapi | Family::Qsv | Family::Amf
+            ) {
                 cfg.bitrate as i64
             } else {
                 0
             };
-            c.rc_buffer_size = ((cfg.bitrate as f64 * cfg.vbv_frames / cfg.fps as f64) as i64).max(1000) as i32;
+            c.rc_buffer_size =
+                ((cfg.bitrate as f64 * cfg.vbv_frames / cfg.fps as f64) as i64).max(1000) as i32;
             c.gop_size = cfg.gop as i32;
             c.max_b_frames = 0;
             c.slices = cfg.slices as i32;
@@ -327,15 +391,23 @@ impl Encoder {
             }
             let unused = d.keys();
             if !unused.is_empty() {
-                eprintln!("[eyepiece-pc] {name}: options not recognised: {}", unused.join(", "));
+                eprintln!(
+                    "[eyepiece-pc] {name}: options not recognised: {}",
+                    unused.join(", ")
+                );
             }
             let mut param_sets = vec![];
             if c.extradata_size > 0 {
                 let ed = std::slice::from_raw_parts(c.extradata, c.extradata_size as usize);
                 param_sets = annexb::param_sets_from_extradata(ed, cfg.codec == Codec::Hevc);
             }
+            let rate_control = if fam == Family::VideoToolbox {
+                "target bitrate (driver-managed VBV/slices)"
+            } else {
+                "CBR"
+            };
             let description = format!(
-                "{name} {}x{} {} {} fps, {:.1} Mbit/s CBR, VBV {:.1} frames, GOP {}, {} slices, opts [{}]",
+                "{name} {}x{} {} {} fps, {:.1} Mbit/s {rate_control}, VBV {:.1} frames, GOP {}, {} slices, opts [{}]",
                 c.width,
                 c.height,
                 pix_fmt_name(first.format()),
@@ -359,7 +431,13 @@ impl Encoder {
     }
 
     /// Encode one frame (its pts in 1/fps units). `idr`: force an IDR now.
-    pub fn encode(&mut self, frame: Frame, pts: i64, idr: bool, out: &mut Vec<Packet>) -> Result<(), String> {
+    pub fn encode(
+        &mut self,
+        frame: Frame,
+        pts: i64,
+        idr: bool,
+        out: &mut Vec<Packet>,
+    ) -> Result<(), String> {
         unsafe {
             let f = &mut *frame.0;
             f.pts = pts;
@@ -373,6 +451,15 @@ impl Encoder {
             drop(frame);
             self.drain(out)
         }
+    }
+
+    /// Finish encoding and collect delayed packets. No more frames may be submitted.
+    pub fn finish(&mut self, out: &mut Vec<Packet>) -> Result<(), String> {
+        check(
+            unsafe { avcodec_send_frame(self.ctx, std::ptr::null()) },
+            "avcodec flush",
+        )?;
+        self.drain(out)
     }
 
     fn drain(&mut self, out: &mut Vec<Packet>) -> Result<(), String> {
@@ -400,9 +487,136 @@ impl Encoder {
                     }
                     annexb::lp_to_annexb(data, 4, &mut v);
                 }
-                out.push(Packet { data: v, key, pts: p.pts });
+                out.push(Packet {
+                    data: v,
+                    key,
+                    pts: p.pts,
+                });
                 av_packet_unref(self.pkt);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_software_encoders_do_not_change_with_codec() {
+        for codec in [Codec::H264, Codec::Hevc] {
+            assert_eq!(encoder_name("x264", codec), "libx264");
+            assert_eq!(encoder_name("x265", codec), "libx265");
+        }
+        assert_eq!(encoder_name("software", Codec::H264), "libx264");
+        assert_eq!(encoder_name("software", Codec::Hevc), "libx265");
+        for (alias, codec) in [
+            ("x264", Codec::Hevc),
+            ("libx264", Codec::Hevc),
+            ("x265", Codec::H264),
+            ("hevc_videotoolbox", Codec::H264),
+        ] {
+            if exists(&encoder_name(alias, codec)) {
+                assert!(resolve(alias, codec, "")
+                    .unwrap_err()
+                    .contains("does not encode"));
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_auto_prefers_hardware_with_codec_appropriate_fallback() {
+        assert_eq!(AUTO_ENCODERS, &["videotoolbox", "software"]);
+        assert_eq!(
+            encoder_name(AUTO_ENCODERS[0], Codec::H264),
+            "h264_videotoolbox"
+        );
+        assert_eq!(
+            encoder_name(AUTO_ENCODERS[0], Codec::Hevc),
+            "hevc_videotoolbox"
+        );
+        assert_eq!(encoder_name(AUTO_ENCODERS[1], Codec::H264), "libx264");
+        assert_eq!(encoder_name(AUTO_ENCODERS[1], Codec::Hevc), "libx265");
+    }
+
+    #[test]
+    fn videotoolbox_aliases_and_target() {
+        assert_eq!(
+            encoder_name("videotoolbox", Codec::H264),
+            "h264_videotoolbox"
+        );
+        assert_eq!(encoder_name("vt", Codec::Hevc), "hevc_videotoolbox");
+        assert_eq!(family("h264_videotoolbox"), Family::VideoToolbox);
+        assert_eq!(family("hevc_videotoolbox"), Family::VideoToolbox);
+        assert_eq!(target_for(Family::VideoToolbox), Target::VideoToolbox);
+        assert_eq!(family("h264_nvenc"), Family::Nvenc);
+    }
+
+    fn config() -> EncoderConfig {
+        EncoderConfig {
+            codec: Codec::H264,
+            encoder: "videotoolbox".into(),
+            fps: 60,
+            bitrate: 20_000_000,
+            gop: 120,
+            vbv_frames: 4.0,
+            slices: 4,
+            preset: None,
+            tune: None,
+            profile: None,
+            intra_refresh: false,
+            opts: vec![],
+            vaapi_device: String::new(),
+        }
+    }
+
+    #[test]
+    fn x264_defaults_match_latency_benchmark_reference() {
+        let defaults = default_opts(Family::X264, &config());
+        assert_eq!(
+            defaults,
+            [
+                ("preset".into(), "superfast".into()),
+                ("tune".into(), "zerolatency".into()),
+                ("profile".into(), "high".into()),
+                ("forced-idr".into(), "1".into()),
+                (
+                    "x264-params".into(),
+                    "scenecut=0:repeat-headers=1:aud=0".into()
+                ),
+            ]
+        );
+        assert_eq!(target_for(Family::X264), Target::Nv12);
+    }
+
+    #[test]
+    fn videotoolbox_defaults_require_hardware_and_allow_overrides() {
+        let mut config = config();
+        let defaults = default_opts(Family::VideoToolbox, &config);
+        for (key, value) in [
+            ("allow_sw", "0"),
+            ("realtime", "1"),
+            ("prio_speed", "1"),
+            ("profile", "high"),
+        ] {
+            assert!(defaults.contains(&(key.into(), value.into())));
+        }
+        assert!(!defaults
+            .iter()
+            .any(|(key, _)| key == "preset" || key == "tune" || key == "constant_bit_rate"));
+        assert_eq!(defaults.len(), 4);
+        config.codec = Codec::Hevc;
+        let hevc = default_opts(Family::VideoToolbox, &config);
+        assert!(hevc.contains(&("max_ref_frames".into(), "1".into())));
+        assert!(!hevc.iter().any(|(key, _)| key == "profile"));
+        config.codec = Codec::H264;
+        config.opts.push(("allow_sw".into(), "1".into()));
+        let options = default_opts(Family::VideoToolbox, &config);
+        assert!(options.contains(&("allow_sw".into(), "1".into())));
+        assert_eq!(
+            options.iter().filter(|(key, _)| key == "allow_sw").count(),
+            1
+        );
     }
 }

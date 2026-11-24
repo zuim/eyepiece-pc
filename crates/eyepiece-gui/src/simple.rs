@@ -43,6 +43,9 @@ impl App {
         if cfg!(windows) {
             v.push(Screen { label: "Main screen".into(), source: "dxgi", output: None, missing: None });
         }
+        if cfg!(target_os = "macos") {
+            v.push(Screen { label: "Main screen (ScreenCaptureKit)".into(), source: "screencapturekit", output: None, missing: None });
+        }
         v.push(Screen { label: "Test pattern".into(), source: "test", output: None, missing: None });
         v
     }
@@ -57,6 +60,7 @@ impl App {
             "pipewire" => "Screen or window… (PipeWire)".into(),
             "x11" => "X11 screen".into(),
             "dxgi" => "Main screen".into(),
+            "screencapturekit" => "Main screen (ScreenCaptureKit)".into(),
             "test" => "Test pattern".into(),
             "file" => "Video file (full view)".into(),
             s => s.to_string(),
