@@ -3,16 +3,16 @@
 use std::process::Command;
 use std::time::Duration;
 
-/// The bridge of eyepiece's PC Display mod: the only one eyepiece-pc starts.
-pub const BRIDGE: &str = "/vendor/eyepiece/current/mods/pcdisplay/bin/pcdisplay_bridge";
+/// The bridge of tinkerglass's PC Display mod: the only one eyepiece-pc starts.
+pub const BRIDGE: &str = "/vendor/tinkerglass/current/mods/pcdisplay/bin/pcdisplay_bridge";
 /// Its process name, for `pidof`.
 const BRIDGE_PROC: &str = "pcdisplay_bridge";
-/// core.menu's launch request (eyepiece contract `files.launch_req`): the bridge starts as from
+/// core.menu's launch request (tinkerglass contract `files.launch_req`): the bridge starts as from
 /// the goggles' menu, with the menu's environment and in the UI's SELinux domain, so it may use
 /// the hub (head tracking) also under enforcing, unlike a bridge started from the ADB shell.
-const LAUNCH_REQ: &str = "/data/vendor/eyepiece/run/menu/launch.req";
-/// Its log (the default of a bridge with `EP_RUN_DIR`; the menu's bridge writes it too).
-pub const DEVICE_LOG: &str = "/data/vendor/eyepiece/run/pcdisplay/bridge.log";
+const LAUNCH_REQ: &str = "/data/vendor/tinkerglass/run/menu/launch.req";
+/// Its log (the default of a bridge with `TG_RUN_DIR`; the menu's bridge writes it too).
+pub const DEVICE_LOG: &str = "/data/vendor/tinkerglass/run/pcdisplay/bridge.log";
 
 #[derive(Clone, Debug)]
 pub struct Adb {
@@ -97,7 +97,7 @@ impl Adb {
         !self.shell(&format!("pidof {BRIDGE_PROC}"), false).unwrap_or_default().trim().is_empty()
     }
 
-    /// Start eyepiece's bridge on the goggles through core.menu, with `-1` (exit with the PC
+    /// Start tinkerglass's bridge on the goggles through core.menu, with `-1` (exit with the PC
     /// session: a bridge left running keeps the goggles black) plus `extra_args`. A bridge
     /// already running (from the menu) hands over to it by itself. Needs the mods running.
     /// `usb_net`: ask the bridge to switch the goggles' USB to network + adb (`-U rndis`; only
@@ -106,8 +106,8 @@ impl Adb {
         if let Err(e) = self.run(&["get-state"], true) {
             return Err(format!(
                 "ADB could not select the goggles: {e}\n\
-                 Connect them by USB, switch them on and enable ADB (eyepiece: Connect in the web \
-                 app, or `ep connect`). If `adb devices` \
+                 Connect them by USB, switch them on and enable ADB (tinkerglass: Connect in the web \
+                 app, or `tg connect`). If `adb devices` \
                  lists more than one device, set the goggles' serial in Advanced → adb serial; \
                  on Windows, make sure Advanced → adb executable points to the same adb.exe."
             ));
@@ -141,7 +141,7 @@ impl Adb {
             true,
         )?;
         if taken.contains("none") {
-            return Err("the eyepiece mods are not running on the goggles: start them (web app, or `ep start`), \
+            return Err("the tinkerglass mods are not running on the goggles: start them (web app, or `tg start`), \
                         then connect again"
                 .into());
         }
@@ -184,7 +184,7 @@ impl Adb {
         log(format!("bridge running on goggles ({exe}, pid {pid})"));
         if started.contains("core.display did not hide the GUI") {
             log("WARNING: the goggles' mods are not running, so the bridge can't show a picture \
-                 (head tracking only): start them (web app, or `ep start`), then connect again"
+                 (head tracking only): start them (web app, or `tg start`), then connect again"
                 .into());
         }
         Ok(())

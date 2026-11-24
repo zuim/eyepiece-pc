@@ -1,6 +1,6 @@
-//! Wire protocol of eyepiece's PC Display mod (all little-endian). Constants, message types
+//! Wire protocol of tinkerglass's PC Display mod (all little-endian). Constants, message types
 //! and struct layouts come from eyepiece `mods/pcdisplay/protocol.json` through
-//! `proto_gen.rs` (generated there, copied here; eyepiece's CI compares the two).
+//! `proto_gen.rs` (generated there, copied here; tinkerglass's CI compares the two).
 //!
 //! Every message: an `ep_hdr_t` (`'E' 'P' type flags u32 len`) + payload.
 
@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(parse_header(&h), Some((EP_VIDEO, EP_FLAG_KEY, 1234)));
         assert_eq!(&h[..2], b"EP");
     }
-    /// Payloads as eyepiece's bridge (host build, null decoder) sent them.
+    /// Payloads as tinkerglass's bridge (host build, null decoder) sent them.
     #[test]
     fn parse_bridge_payloads() {
         let hex = |s: &str| (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect::<Vec<_>>();

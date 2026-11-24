@@ -58,7 +58,7 @@ pub struct Args {
     #[arg(long)]
     pub no_forward: bool,
     /// don't start a bridge for this session: use the one already running on the goggles
-    /// (started from their menu). Default: start eyepiece's bridge (PC Display); it
+    /// (started from their menu). Default: start tinkerglass's bridge (PC Display); it
     /// replaces a bridge started from the menu and exits with this session
     #[arg(long)]
     pub no_deploy: bool,

@@ -212,7 +212,7 @@ fn connect(cfg: &Config, enc: &EncoderConfig, ev: &Events) -> Result<Option<Arc<
                 std::thread::sleep(Duration::from_millis(20));
             }
             if l.info().is_none_or(|i| i.flags & proto::EP_INFO_STEREO == 0) {
-                return Err("this bridge has no stereo support (update eyepiece's PC Display)"
+                return Err("this bridge has no stereo support (update tinkerglass's PC Display)"
                     .into());
             }
         }
