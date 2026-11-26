@@ -45,8 +45,6 @@
             nativeBuildInputs = with pkgs; [
               pkg-config
               rustPlatform.bindgenHook
-            ] ++ lib.optionals stdenv.hostPlatform.isLinux [
-              makeWrapper
             ] ++ lib.optionals stdenv.hostPlatform.isDarwin [
               swift
               swiftpm

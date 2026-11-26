@@ -113,13 +113,12 @@ impl Adb {
     /// running keeps the goggles black) plus `extra_args`. `bridge` = a local binary to push
     /// first; `None` = use one already on the goggles (pushed earlier, or the one natartos
     /// installed with the Eyepiece mod).
-    /// Ask supported bridges to enable the requested USB transports. Older bridges keep their
-    /// existing behavior; the caller decides whether that is acceptable for the selected mode.
+    /// Ask supported bridges to enable USB bulk. Older bridges keep their existing behavior;
+    /// the caller decides whether that is acceptable for the selected mode.
     pub fn deploy(
         &self,
         bridge: Option<&Path>,
         extra_args: &str,
-        usb_net: bool,
         usb_bulk: bool,
         log: &dyn Fn(String),
     ) -> Result<(), String> {
@@ -162,20 +161,12 @@ impl Adb {
             }
         };
         let mut args = extra_args.to_string();
-        if usb_net && !args.contains("-U") {
-            let help = self.shell(&format!("{exe} -h 2>&1; true"), false).unwrap_or_default();
-            if help.contains("-U adb|rndis") {
-                args = format!("-U rndis {args}");
-            } else {
-                log("this eyepiece_bridge has no USB network support (older natartos): adb only".into());
-            }
-        }
         if usb_bulk && !args.split_whitespace().any(|arg| arg == "-B") {
             let help = self.shell(&format!("{exe} -h 2>&1; true"), false).unwrap_or_default();
             if help.contains("-B          add a dedicated FunctionFS bulk interface") {
                 args = format!("-B {args}");
             } else {
-                log("this eyepiece_bridge has no USB bulk support; auto mode will use USB network/ADB".into());
+                log("this eyepiece_bridge has no USB bulk support; auto mode will use adb forwarding".into());
             }
         }
         self.stop_bridge();
@@ -184,8 +175,8 @@ impl Adb {
         self.shell(&format!("nohup {exe} -1 -b {args} >/dev/null 2>&1 < /dev/null &"), true)?;
         // adb forward accepts a TCP connect even when nothing listens on the goggles yet (and
         // closes it right away), so a connect is no proof: wait for the bridge's own log line.
-        // Startup takes >1 s without fb_gui_hide (overlay ack wait), and a bridge that switches
-        // USB to RNDIS + adb drops adb for a few seconds (sometimes until `adb reconnect`).
+        // Startup can take >1 s while the bridge waits for overlay acknowledgements, and
+        // FunctionFS USB configuration changes can briefly disconnect adb.
         let t0 = std::time::Instant::now();
         let mut last_reconnect = t0;
         let mut offline_logged = false;
@@ -198,7 +189,7 @@ impl Adb {
                 Ok(_) => {}
                 Err(_) => {
                     if !offline_logged {
-                        log("goggles' USB is re-enumerating (bridge switches to USB network) …".into());
+                        log("goggles' USB is re-enumerating …".into());
                         offline_logged = true;
                     }
                     if last_reconnect.elapsed() >= Duration::from_secs(3) {
@@ -214,9 +205,6 @@ impl Adb {
             std::thread::sleep(Duration::from_millis(300));
         }
         let pid = self.shell("pidof eyepiece_bridge", false).unwrap_or_default();
-        for l in self.shell(&format!("grep 'rndis:' {DEVICE_LOG}"), false).unwrap_or_default().lines() {
-            log(format!("goggles: {}", l.split_once(' ').map(|x| x.1).unwrap_or(l)));
-        }
         log(format!("eyepiece_bridge running on goggles (pid {pid})"));
         if !self.overlay_loaded() {
             log("WARNING: natartos overlay not detected (hook_overlay.so is not mapped in dji_glasses) — \

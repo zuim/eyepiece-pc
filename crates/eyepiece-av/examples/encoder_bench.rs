@@ -89,6 +89,7 @@ fn main() -> Result<(), String> {
             gpu_scale_cpu_input: false,
             extra_vf: None,
             scale_mode: "hq".into(),
+            packed_alpha: None,
         },
         fps,
     );

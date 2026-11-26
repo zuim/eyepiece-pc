@@ -4,7 +4,6 @@
 pub mod adb;
 pub mod clock;
 pub mod link;
-pub mod net;
 pub mod proto;
 pub mod stats;
 pub mod usb;

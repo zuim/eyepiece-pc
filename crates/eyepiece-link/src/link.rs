@@ -7,11 +7,12 @@ use crate::stats::{Interval, Snapshot};
 use nusb::io::{EndpointRead, EndpointWrite};
 use nusb::transfer::{Bulk, In, Out};
 use nusb::{Device, Interface};
+use prost::Message;
 use std::collections::VecDeque;
 use std::io::{IoSlice, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 pub type LogFn = Arc<dyn Fn(String) + Send + Sync>;
@@ -61,6 +62,10 @@ pub struct Shared {
     pub info: Mutex<Option<Info>>,
     pub last_pose: Mutex<Option<Pose>>,
     key_request: AtomicBool,
+    configure_ack: Mutex<Option<(u32, Option<u32>)>>,
+    configure_cv: Condvar,
+    gui_alpha_ack: Mutex<Option<(u32, bool, Option<u32>)>>,
+    gui_alpha_cv: Condvar,
     /// AUs sent since the last EP_FRAME, and when the first of them was sent
     unacked: AtomicU32,
     t_first_unacked: AtomicU64,
@@ -86,6 +91,12 @@ pub struct Link {
     transport_name: String,
     selected_transport: LinkTransport,
     pub shared: Arc<Shared>,
+    configure_lock: Mutex<()>,
+    next_configure_id: AtomicU32,
+    /// True while the bridge has acknowledged a stream configuration that video may use.
+    configured: AtomicBool,
+    gui_alpha_lock: Mutex<()>,
+    next_gui_alpha_id: AtomicU32,
 }
 
 enum Writer {
@@ -98,15 +109,34 @@ enum Reader {
     Usb(EndpointRead<Bulk>),
 }
 
+fn video_frame_prefix(pts_us: u64, codec: u8, key: bool, au_len: usize) -> std::io::Result<([u8; 4], Vec<u8>, Vec<u8>)> {
+    if au_len == 0 || au_len > EP_MAX_PAYLOAD as usize {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid video access unit size"));
+    }
+    let video = wire::Video { pts_us, codec: codec.into(), key, access_unit: Vec::new() };
+    let mut video_prefix = video.encode_to_vec();
+    video_prefix.push(0x22); // Video.access_unit
+    prost::encoding::encode_varint(au_len as u64, &mut video_prefix);
+    let video_len = video_prefix.len() + au_len;
+    let mut packet_prefix = Vec::new();
+    prost::encoding::encode_key(50, prost::encoding::WireType::LengthDelimited, &mut packet_prefix);
+    prost::encoding::encode_varint(video_len as u64, &mut packet_prefix);
+    let packet_len = packet_prefix.len() + video_len;
+    if packet_len > EP_MAX_PAYLOAD as usize {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "bridge message exceeds size limit"));
+    }
+    Ok(((packet_len as u32).to_be_bytes(), packet_prefix, video_prefix))
+}
+
 impl Writer {
     fn write_parts(&mut self, parts: &[&[u8]]) -> std::io::Result<()> {
         match self {
             Writer::Tcp(stream) => write_all_vectored(stream, parts),
             Writer::Usb(stream) => {
                 for part in parts {
-                    stream.write_all(part)?;
+                    stream.write_all(part).map_err(usb_io_error)?;
                 }
-                stream.flush()
+                stream.flush().map_err(usb_io_error)
             }
         }
     }
@@ -116,9 +146,22 @@ impl Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             Reader::Tcp(stream) => stream.read(buf),
-            Reader::Usb(stream) => stream.read(buf),
+            Reader::Usb(stream) => stream.read(buf).map_err(usb_io_error),
         }
     }
+}
+
+fn usb_io_error(error: std::io::Error) -> std::io::Error {
+    #[cfg(target_os = "macos")]
+    if error.get_ref().and_then(|e| e.downcast_ref::<nusb::transfer::TransferError>())
+        == Some(&nusb::transfer::TransferError::Unknown(0xe00002ed))
+    {
+        return std::io::Error::new(
+            std::io::ErrorKind::ConnectionAborted,
+            "USB device not responding (IOKit 0xe00002ed); check USB connection or try --transport adb",
+        );
+    }
+    error
 }
 
 fn connect_once(addr: &str) -> std::io::Result<TcpStream> {
@@ -166,7 +209,10 @@ fn open_usb(serial: Option<&str>) -> Result<(Writer, Reader, (Device, Interface)
         .interface
         .endpoint::<Bulk, Out>(endpoints.out_address)
         .map_err(|e| format!("cannot open Eyepiece bulk OUT endpoint ({e})"))?;
-    let reader = EndpointRead::new(in_endpoint, 64 * 1024)
+    // A full-size USB packet does not terminate a larger bulk transfer.
+    // Read one packet at a time so sparse frame reports are not held until
+    // a short packet or 64 KiB of subsequent traffic arrives.
+    let reader = EndpointRead::new(in_endpoint, endpoints.in_max_packet_size)
         .with_num_transfers(2)
         .with_read_timeout(Duration::from_millis(100));
     let writer = EndpointWrite::new(out_endpoint, 64 * 1024)
@@ -246,6 +292,10 @@ impl Link {
             info: Mutex::new(None),
             last_pose: Mutex::new(None),
             key_request: AtomicBool::new(false),
+            configure_ack: Mutex::new(None),
+            configure_cv: Condvar::new(),
+            gui_alpha_ack: Mutex::new(None),
+            gui_alpha_cv: Condvar::new(),
             unacked: AtomicU32::new(0),
             t_first_unacked: AtomicU64::new(0),
             last_forced_idr: AtomicU64::new(0),
@@ -260,6 +310,11 @@ impl Link {
             transport_name,
             selected_transport,
             shared,
+            configure_lock: Mutex::new(()),
+            next_configure_id: AtomicU32::new(1),
+            configured: AtomicBool::new(false),
+            gui_alpha_lock: Mutex::new(()),
+            next_gui_alpha_id: AtomicU32::new(1),
         });
         {
             let l = link.clone();
@@ -289,13 +344,26 @@ impl Link {
     }
 
     pub fn close(&self) {
+        let _ack = self.shared.configure_ack.lock().unwrap();
+        let _gui_ack = self.shared.gui_alpha_ack.lock().unwrap();
         self.shared.alive.store(false, Ordering::Relaxed);
+        self.shared.configure_cv.notify_all();
+        self.shared.gui_alpha_cv.notify_all();
+        drop(_gui_ack);
+        drop(_ack);
         self.shutdown_io();
     }
 
     fn fail(&self, e: std::io::Error) -> std::io::Error {
-        if self.shared.alive.swap(false, Ordering::Relaxed) {
-            (self.shared.log)(format!("connection to goggles closed ({e})"));
+        let ack = self.shared.configure_ack.lock().unwrap();
+        let gui_ack = self.shared.gui_alpha_ack.lock().unwrap();
+        let was_alive = self.shared.alive.swap(false, Ordering::Relaxed);
+        self.shared.configure_cv.notify_all();
+        self.shared.gui_alpha_cv.notify_all();
+        drop(gui_ack);
+        drop(ack);
+        if was_alive {
+            (self.shared.log)(format!("connection to goggles closed on {} ({e})", self.transport_name));
         }
         self.shutdown_io();
         e
@@ -319,16 +387,27 @@ impl Link {
         result.map_err(|e| self.fail(e))
     }
 
-    pub fn send(&self, mtype: u8, flags: u8, payload: &[u8]) -> std::io::Result<()> {
-        let h = header(mtype, flags, payload.len() as u32);
-        self.write_parts(&[&h, payload])
+    fn send(&self, message: wire::envelope::Message) -> std::io::Result<()> {
+        let frame = bridge_frame(message)?;
+        self.write_parts(&[&frame])
     }
 
-    /// EP_VIDEO without copying the AU (header + ep_video_t + AU in one writev).
+    fn send_request(&self, id: u32, message: wire::envelope::Message) -> std::io::Result<()> {
+        let envelope = wire::Envelope {
+            id: Some(id.to_string()), sender: None, recipient: None, message: Some(message),
+        };
+        let frame = encode_frame(&envelope, EP_MAX_PAYLOAD as usize)?;
+        self.write_parts(&[&frame])
+    }
+
+    /// Encode the protobuf prefixes separately so the access unit is not copied.
     pub fn send_video(&self, pts_us: u64, codec: u8, key: bool, au: &[u8]) -> std::io::Result<()> {
-        let pre = video_prefix(pts_us, codec);
-        let h = header(EP_VIDEO, if key { EP_FLAG_KEY } else { 0 }, (pre.len() + au.len()) as u32);
-        self.write_parts(&[&h, &pre, au])?;
+        let _guard = self.configure_lock.lock().unwrap();
+        if !self.configured.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("stream is not configured"));
+        }
+        let (length, packet_prefix, video_prefix) = video_frame_prefix(pts_us, codec, key, au.len())?;
+        self.write_parts(&[&length, &packet_prefix, &video_prefix, au])?;
         let now = mono_us();
         if self.shared.unacked.fetch_add(1, Ordering::Relaxed) == 0 {
             self.shared.t_first_unacked.store(now, Ordering::Relaxed);
@@ -344,18 +423,94 @@ impl Link {
         *self.shared.info.lock().unwrap()
     }
 
-    pub fn send_stream(&self, w: u16, h: u16, codec: u8, fps: u32, layout: u8) -> std::io::Result<()> {
-        self.send(EP_STREAM, 0, &stream_payload(w, h, codec, fps, layout))
+    /// Define or replace the stream. Video is refused until the bridge acknowledges it, and
+    /// again after any failure. Stop sending old video before calling; resume with an IDR.
+    pub fn configure(&self, config: StreamConfig, timeout: Duration) -> std::io::Result<()> {
+        let _guard = self.configure_lock.lock().unwrap();
+        let info = self.info().ok_or_else(|| std::io::Error::other("bridge capabilities not received"))?;
+        let replacing = self.configured.swap(false, Ordering::Relaxed);
+        if replacing && info.flags & EP_INFO_RECONFIG == 0 {
+            return Err(std::io::Error::other("bridge does not support live stream reconfiguration"));
+        }
+        let payload = config.payload(info).map_err(std::io::Error::other)?;
+        let id = self.next_configure_id.fetch_add(1, Ordering::Relaxed);
+        *self.shared.configure_ack.lock().unwrap() = Some((id, None));
+        if let Err(e) = self.send_request(id, wire::envelope::Message::Configure(payload)) {
+            *self.shared.configure_ack.lock().unwrap() = None;
+            return Err(e);
+        }
+        let ack = self.shared.configure_ack.lock().unwrap();
+        let (mut ack, _) = self.shared.configure_cv.wait_timeout_while(ack, timeout, |ack| {
+            ack.as_ref().is_some_and(|(_, status)| status.is_none()) && self.alive()
+        }).unwrap();
+        let result = ack.take().and_then(|(_, status)| status);
+        drop(ack);
+        match result {
+            Some(0) => {
+                self.configured.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+            // A rejected request leaves the previous stream active.
+            Some(status @ (1 | 3)) => {
+                self.configured.store(replacing, Ordering::Relaxed);
+                Err(std::io::Error::other(if status == 1 {
+                    "bridge rejected the stream configuration"
+                } else {
+                    "bridge does not support this stream configuration"
+                }))
+            }
+            Some(status) => Err(self.fail(std::io::Error::other(format!("bridge stream configuration failed ({status})")))),
+            None => Err(self.fail(std::io::Error::new(std::io::ErrorKind::TimedOut, "bridge configuration not acknowledged"))),
+        }
+    }
+    pub fn set_gui_alpha(&self, alpha: u8, timeout: Duration) -> std::io::Result<()> {
+        self.set_alpha(alpha, timeout, false)
+    }
+
+    pub fn set_pane_alpha(&self, alpha: u8, timeout: Duration) -> std::io::Result<()> {
+        self.set_alpha(alpha, timeout, true)
+    }
+
+    fn set_alpha(&self, alpha: u8, timeout: Duration, pane: bool) -> std::io::Result<()> {
+        let _guard = self.gui_alpha_lock.lock().unwrap();
+        let info = self.info().ok_or_else(|| std::io::Error::other("bridge capabilities not received"))?;
+        let name = if pane { "pane opacity" } else { "GUI opacity" };
+        let capability = if pane { EP_INFO_PANE_ALPHA } else { EP_INFO_GUI_ALPHA };
+        if info.flags & capability == 0 {
+            return Err(std::io::Error::other(format!("bridge does not support {name}")));
+        }
+        let id = self.next_gui_alpha_id.fetch_add(1, Ordering::Relaxed);
+        let message = if pane {
+            wire::envelope::Message::PaneAlpha(wire::PaneAlpha { alpha: alpha.into() })
+        } else {
+            wire::envelope::Message::GuiAlpha(wire::GuiAlpha { alpha: alpha.into() })
+        };
+        *self.shared.gui_alpha_ack.lock().unwrap() = Some((id, pane, None));
+        if let Err(e) = self.send_request(id, message) {
+            *self.shared.gui_alpha_ack.lock().unwrap() = None;
+            return Err(e);
+        }
+        let ack = self.shared.gui_alpha_ack.lock().unwrap();
+        let (mut ack, _) = self.shared.gui_alpha_cv.wait_timeout_while(ack, timeout, |ack| {
+            ack.as_ref().is_some_and(|(_, _, status)| status.is_none()) && self.alive()
+        }).unwrap();
+        let result = ack.take().and_then(|(_, _, status)| status);
+        drop(ack);
+        match result {
+            Some(0) => Ok(()),
+            Some(status) => Err(std::io::Error::other(format!("{name} unavailable ({status}); check bridge and overlay"))),
+            None => Err(self.fail(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{name} not acknowledged")))),
+        }
     }
     pub fn recenter(&self) -> std::io::Result<()> {
-        self.send(EP_CTRL, 0, &[EP_OP_RECENTER])
+        self.send(wire::envelope::Message::Control(wire::Control { operation: EP_OP_RECENTER.into(), enabled: false }))
     }
     /// Start/stop the goggles' head-attitude stream (the IMU stream runs only while on).
     pub fn set_head_tracking(&self, on: bool) -> std::io::Result<()> {
-        self.send(EP_CTRL, 0, &[EP_OP_HEADTRACK, on as u8])
+        self.send(wire::envelope::Message::Control(wire::Control { operation: EP_OP_HEADTRACK.into(), enabled: on }))
     }
     pub fn quit_bridge(&self) -> std::io::Result<()> {
-        self.send(EP_CTRL, 0, &[EP_OP_QUIT])
+        self.send(wire::envelope::Message::Control(wire::Control { operation: EP_OP_QUIT.into(), enabled: false }))
     }
 
     /// Bytes written but not yet taken by the peer (adb server / bridge): Linux SIOCOUTQ.
@@ -405,7 +560,7 @@ impl Link {
     fn ping_loop(&self) {
         let mut n = 0u32;
         while self.alive() {
-            if self.send(EP_PING, 0, &mono_us().to_le_bytes()).is_err() {
+            if self.send(wire::envelope::Message::Ping(wire::Ping { pc_us: mono_us() })).is_err() {
                 break;
             }
             n += 1;
@@ -418,15 +573,16 @@ impl Link {
         let mut buf = Vec::new();
         let r: std::io::Result<()> = (|| {
             while self.alive() {
-                let mut h = [0u8; HDR_LEN];
+                let mut h = [0u8; 4];
                 read_exact_active(&mut s, &mut h, &self.shared.alive)?;
-                let (t, _f, len) = parse_header(&h).ok_or_else(|| std::io::Error::other("bad magic from goggles"))?;
-                if len > EP_MAX_PAYLOAD {
-                    return Err(std::io::Error::other("oversized message from goggles"));
+                let len = u32::from_be_bytes(h);
+                if len == 0 || len > EP_MAX_PAYLOAD {
+                    return Err(std::io::Error::other("invalid bridge protobuf message size (incompatible bridge?)"));
                 }
                 buf.resize(len as usize, 0);
                 read_exact_active(&mut s, &mut buf, &self.shared.alive)?;
-                self.handle(t, &buf);
+                let envelope = decode_envelope(&buf, EP_MAX_PAYLOAD as usize)?;
+                self.handle(envelope)?;
             }
             Ok(())
         })();
@@ -435,14 +591,21 @@ impl Link {
                 self.fail(e);
             }
         }
+        let _ack = self.shared.configure_ack.lock().unwrap();
+        let _gui_ack = self.shared.gui_alpha_ack.lock().unwrap();
         self.shared.alive.store(false, Ordering::Relaxed);
+        self.shared.configure_cv.notify_all();
+        self.shared.gui_alpha_cv.notify_all();
     }
 
-    fn handle(&self, t: u8, p: &[u8]) {
+    fn handle(&self, envelope: wire::Envelope) -> std::io::Result<()> {
         let sh = &self.shared;
-        match t {
-            EP_POSE => {
-                let Some(pose) = Pose::parse(p) else { return };
+        let pane_alpha_ack = matches!(&envelope.message, Some(wire::envelope::Message::PaneAlphaAck(_)));
+        let id = envelope.id;
+        match envelope.message.ok_or_else(|| std::io::Error::other("envelope has no message"))? {
+            wire::envelope::Message::Pose(value) => {
+                let pose = Pose::try_from(value)
+                    .map_err(std::io::Error::other)?;
                 *sh.last_pose.lock().unwrap() = Some(pose);
                 sh.stats.lock().unwrap().poses += 1;
                 if let Some((u, a)) = &sh.opentrack {
@@ -463,39 +626,73 @@ impl Link {
                     );
                 }
             }
-            EP_PONG if p.len() >= 16 => {
-                let t_pc = u64::from_le_bytes(p[0..8].try_into().unwrap());
-                let t_dev = u64::from_le_bytes(p[8..16].try_into().unwrap());
+            wire::envelope::Message::Pong(pong) => {
+                let t_pc = pong.pc_us;
+                let t_dev = pong.device_us;
                 let now = mono_us();
-                let rtt = now.saturating_sub(t_pc);
-                sh.clock.lock().unwrap().add(rtt, t_dev as i64 - (t_pc + rtt / 2) as i64);
+                let invalid = || std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid bridge pong timestamp");
+                let rtt = now.checked_sub(t_pc).ok_or_else(invalid)?;
+                let offset = i64::try_from(i128::from(t_dev) - i128::from(t_pc + rtt / 2))
+                    .map_err(|_| invalid())?;
+                sh.clock.lock().unwrap().add(rtt, offset);
             }
-            EP_FRAME => {
-                let Some(f) = FrameReport::parse(p) else { return };
-                sh.unacked.store(0, Ordering::Relaxed);
+            wire::envelope::Message::Frame(value) => {
+                let f = FrameReport::from(value);
                 let off = sh.offset_us();
+                let times = off.map(|o| {
+                    let elapsed = |timestamp| {
+                        i64::try_from(i128::from(timestamp) - i128::from(o) - i128::from(f.pts_us))
+                            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid bridge frame timestamp"))
+                    };
+                    Ok::<_, std::io::Error>((elapsed(f.t_shown_us)?, elapsed(f.t_recv_us)?))
+                }).transpose()?;
+                sh.unacked.store(0, Ordering::Relaxed);
                 let mut s = sh.stats.lock().unwrap();
                 s.shown += 1;
                 s.dec.push(f.decode_us);
                 s.cvt.push(f.convert_us);
                 s.q_max = s.q_max.max(f.queue_depth);
                 s.dropped = f.dropped;
-                if let Some(o) = off {
-                    s.lat.push(f.t_shown_us as i64 - o - f.pts_us as i64);
-                    s.recv.push(f.t_recv_us as i64 - o - f.pts_us as i64);
+                if let Some((latency, receive)) = times {
+                    s.lat.push(latency);
+                    s.recv.push(receive);
                 }
             }
-            EP_LOG => {
-                let m = String::from_utf8_lossy(p).to_string();
+            wire::envelope::Message::Log(value) => {
+                let m = value.line;
                 // "decode queue overflow → waiting for next keyframe": resync now, not at the next GOP
                 if m.contains("keyframe") || m.contains("overflow") {
                     sh.key_request.store(true, Ordering::Relaxed);
                 }
                 (sh.log)(format!("goggles: {m}"));
             }
-            EP_KEYREQ => sh.key_request.store(true, Ordering::Relaxed),
-            EP_INFO => {
-                let Some(i) = Info::parse(p) else { return };
+            wire::envelope::Message::KeyRequest(_) => {
+                sh.key_request.store(true, Ordering::Relaxed);
+            }
+            wire::envelope::Message::ConfigureAck(wire::Acknowledgement { status }) => {
+                let id = bridge_ack_id(id.as_deref())?;
+                let mut ack = sh.configure_ack.lock().unwrap();
+                if let Some((pending, result)) = ack.as_mut() {
+                    if *pending == id && result.is_none() {
+                        *result = Some(status);
+                        sh.configure_cv.notify_all();
+                    }
+                }
+            }
+            wire::envelope::Message::GuiAlphaAck(wire::Acknowledgement { status }) |
+            wire::envelope::Message::PaneAlphaAck(wire::Acknowledgement { status }) => {
+                let id = bridge_ack_id(id.as_deref())?;
+                let mut ack = sh.gui_alpha_ack.lock().unwrap();
+                if let Some((pending, pane, result)) = ack.as_mut() {
+                    if *pending == id && *pane == pane_alpha_ack && result.is_none() {
+                        *result = Some(status);
+                        sh.gui_alpha_cv.notify_all();
+                    }
+                }
+            }
+            wire::envelope::Message::Info(value) => {
+                let i = Info::try_from(value)
+                    .map_err(std::io::Error::other)?;
                 (sh.log)(format!(
                     "bridge v{}: fb {}x{}, decoder={}, headtrack flags={:#x}",
                     i.version,
@@ -505,13 +702,22 @@ impl Link {
                     i.headtrack
                 ));
                 if i.version != EP_VERSION {
-                    (sh.log)(format!("WARNING: protocol version mismatch (bridge {}, pc {EP_VERSION})", i.version));
+                    return Err(std::io::Error::other(format!("protocol version mismatch (bridge {}, pc {EP_VERSION})", i.version)));
                 }
                 *sh.info.lock().unwrap() = Some(i);
             }
-            _ => {}
+            _ => return Err(std::io::Error::other("unexpected bridge message")),
         }
+        Ok(())
     }
+}
+
+fn bridge_ack_id(id: Option<&str>) -> std::io::Result<u32> {
+    id.filter(|id| !id.is_empty() && id.len() <= 10
+        && (id.len() == 1 || !id.starts_with('0'))
+        && id.bytes().all(|byte| byte.is_ascii_digit()))
+        .and_then(|id| id.parse().ok())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid bridge acknowledgement ID"))
 }
 
 fn read_exact_active<R: Read>(reader: &mut R, buf: &mut [u8], alive: &AtomicBool) -> std::io::Result<()> {
@@ -563,6 +769,313 @@ mod tests {
     use super::*;
     use std::collections::VecDeque;
 
+    fn read_packet(stream: &mut TcpStream) -> wire::Envelope {
+        let mut length = [0; 4];
+        stream.read_exact(&mut length).unwrap();
+        let mut payload = vec![0; u32::from_be_bytes(length) as usize];
+        stream.read_exact(&mut payload).unwrap();
+        wire::Envelope::decode(&payload[..]).unwrap()
+    }
+
+    fn ack_frame(id: u32, message: wire::envelope::Message) -> Vec<u8> {
+        encode_frame(&wire::Envelope {
+            id: Some(id.to_string()), sender: None, recipient: None, message: Some(message),
+        }, EP_MAX_PAYLOAD as usize).unwrap()
+    }
+
+    #[test]
+    #[ignore = "manual serialization microbenchmark; run in release mode"]
+    fn benchmark_video_serialization() {
+        use std::hint::black_box;
+
+        fn measure(mut operation: impl FnMut(), iterations: usize) -> (u128, u128) {
+            const BATCHES: usize = 100;
+            let mut samples = Vec::with_capacity(BATCHES);
+            for _ in 0..BATCHES {
+                let start = Instant::now();
+                for _ in 0..iterations / BATCHES {
+                    operation();
+                }
+                samples.push(start.elapsed().as_nanos() / (iterations / BATCHES) as u128);
+            }
+            samples.sort_unstable();
+            (samples[BATCHES / 2], samples[BATCHES * 95 / 100])
+        }
+
+        println!("access_unit_bytes,iterations,encoded_bytes,prefix_median_ns,prefix_p95_ns,prost_encode_median_ns,prost_encode_p95_ns,prost_decode_median_ns,prost_decode_p95_ns");
+        for (size, iterations) in [(8192, 20000), (25000, 20000), (262144, 5000), ((4 << 20) - 64, 500)] {
+            let envelope = wire::Envelope {
+                message: Some(wire::envelope::Message::Video(wire::Video {
+                    pts_us: 123456789, codec: 1, key: true, access_unit: vec![0xa5; size],
+                })),
+                ..Default::default()
+            };
+            let frame = encode_frame(&envelope, EP_MAX_PAYLOAD as usize).unwrap();
+            let (prefix, prefix_p95) = measure(|| {
+                black_box(video_frame_prefix(123456789, 1, true, black_box(size)).unwrap());
+            }, iterations);
+            let (encode, encode_p95) = measure(|| {
+                black_box(encode_frame(black_box(&envelope), EP_MAX_PAYLOAD as usize).unwrap());
+            }, iterations);
+            let (decode, decode_p95) = measure(|| {
+                black_box(decode_envelope(black_box(&frame[4..]), EP_MAX_PAYLOAD as usize).unwrap());
+            }, iterations);
+            println!("{size},{iterations},{},{prefix},{prefix_p95},{encode},{encode_p95},{decode},{decode_p95}", frame.len() - 4);
+        }
+    }
+
+    #[test]
+    fn video_protobuf_preserves_access_units_and_size_limit() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let mut videos = Vec::new();
+            while videos.len() < 2 {
+                let packet = read_packet(&mut stream);
+                if let Some(wire::envelope::Message::Video(video)) = packet.message {
+                    videos.push(video);
+                }
+            }
+            videos
+        });
+        let options = LinkOptions {
+            addr: addr.to_string(), transport: LinkTransport::Tcp,
+            connect_timeout: Duration::from_secs(2), opentrack: None,
+            print_pose: false, head_tracking: false,
+        };
+        let link = Link::connect(&options, Arc::new(|_| {})).unwrap();
+        assert!(link.send_video(1, EP_CODEC_HEVC, true, &[1]).is_err());
+        link.configured.store(true, Ordering::Relaxed);
+        link.send_video(123, EP_CODEC_HEVC, true, &[1, 2, 3]).unwrap();
+        let mut video = wire::Video {
+            pts_us: 123, codec: EP_CODEC_HEVC.into(), key: true,
+            access_unit: vec![0xa5; EP_MAX_PAYLOAD as usize],
+        };
+        loop {
+            let video_len = video.encoded_len();
+            let packet_len = 2 + prost::encoding::encoded_len_varint(video_len as u64) + video_len;
+            if packet_len <= EP_MAX_PAYLOAD as usize {
+                assert_eq!(packet_len, EP_MAX_PAYLOAD as usize);
+                break;
+            }
+            video.access_unit.pop();
+        }
+        link.send_video(video.pts_us, EP_CODEC_HEVC, true, &video.access_unit).unwrap();
+        video.access_unit.push(0xa5);
+        assert_eq!(link.send_video(123, EP_CODEC_HEVC, true, &video.access_unit).unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+        assert!(link.send_video(123, EP_CODEC_HEVC, true, &[]).is_err());
+        let received = server.join().unwrap();
+        assert_eq!(received[0].access_unit, [1, 2, 3]);
+        assert_eq!((received[0].pts_us, received[0].codec, received[0].key), (123, 1, true));
+        video.access_unit.pop();
+        assert_eq!(received[1], video);
+        link.close();
+    }
+
+    #[test]
+    fn incompatible_and_malformed_bridge_messages_close_the_link() {
+        let version = bridge_frame(wire::envelope::Message::Info(wire::Info { version: EP_VERSION - 1, ..Default::default() })).unwrap();
+        let mut bad_frame = bridge_frame(wire::envelope::Message::Pong(wire::Pong {
+            pc_us: 0, device_us: 0,
+        })).unwrap();
+        bad_frame.extend(bridge_frame(wire::envelope::Message::Frame(wire::Frame {
+            shown_us: u64::MAX, ..Default::default()
+        })).unwrap());
+        let cases = [
+            (version, "protocol version mismatch"),
+            (bridge_frame(wire::envelope::Message::Pong(wire::Pong {
+                pc_us: u64::MAX, device_us: 0,
+            })).unwrap(), "invalid bridge pong timestamp"),
+            (bridge_frame(wire::envelope::Message::Pong(wire::Pong {
+                pc_us: 0, device_us: u64::MAX,
+            })).unwrap(), "invalid bridge pong timestamp"),
+            (bad_frame, "invalid bridge frame timestamp"),
+            (b"EP\x85\x00\x0c\x00\x00\x00".to_vec(), "incompatible bridge"),
+            (vec![0, 0, 0, 1, 0], "failed to decode"),
+            (vec![0, 0, 0, 2, 0x12, 0], "has no message"),
+        ];
+        for (bytes, expected) in cases {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.write_all(&bytes).unwrap();
+                done_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            });
+            let messages = Arc::new(Mutex::new(Vec::new()));
+            let captured = messages.clone();
+            let options = LinkOptions {
+                addr: addr.to_string(), transport: LinkTransport::Tcp,
+                connect_timeout: Duration::from_secs(2), opentrack: None,
+                print_pose: false, head_tracking: false,
+            };
+            let link = Link::connect(&options, Arc::new(move |message| captured.lock().unwrap().push(message))).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while (link.alive() || !messages.lock().unwrap().iter().any(|message| message.contains(expected)))
+                && Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!link.alive());
+            let messages = messages.lock().unwrap();
+            assert!(messages.iter().any(|message| message.contains(expected)),
+                    "missing {expected} in {:?}", *messages);
+            drop(messages);
+            done_tx.send(()).unwrap();
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn opacity_requires_matching_ack_type_and_id_and_reports_failure() {
+        for pane in [false, true] {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let info = wire::Info { version: EP_VERSION, flags: EP_INFO_GUI_ALPHA | EP_INFO_PANE_ALPHA, ..Default::default() };
+            stream.write_all(&bridge_frame(wire::envelope::Message::Info(info)).unwrap()).unwrap();
+            let mut requests = 0;
+            while requests < 3 {
+                let packet = read_packet(&mut stream);
+                let alpha = match packet.message {
+                    Some(wire::envelope::Message::GuiAlpha(request)) if !pane => request.alpha,
+                    Some(wire::envelope::Message::PaneAlpha(request)) if pane => request.alpha,
+                    _ => continue,
+                };
+                let ack = |status| {
+                    let ack = wire::Acknowledgement { status };
+                    if pane { wire::envelope::Message::PaneAlphaAck(ack) }
+                    else { wire::envelope::Message::GuiAlphaAck(ack) }
+                };
+                requests += 1;
+                let id: u32 = packet.id.unwrap().parse().unwrap();
+                if requests == 3 { std::thread::sleep(Duration::from_millis(300)); break; }
+                assert_eq!(alpha, if requests == 1 { 128 } else { 0 });
+                if requests == 1 {
+                    let wrong = wire::Acknowledgement { status: 2 };
+                    let wrong = if pane { wire::envelope::Message::GuiAlphaAck(wrong) }
+                                else { wire::envelope::Message::PaneAlphaAck(wrong) };
+                    stream.write_all(&ack_frame(id, wrong)).unwrap();
+                    stream.write_all(&ack_frame(id + 1, ack(0))).unwrap();
+                }
+                stream.write_all(&ack_frame(id, ack(if requests == 2 { 2 } else { 0 }))).unwrap();
+            }
+        });
+        let options = LinkOptions {
+            addr: addr.to_string(), transport: LinkTransport::Tcp,
+            connect_timeout: Duration::from_secs(2), opentrack: None,
+            print_pose: false, head_tracking: false,
+        };
+        let link = Link::connect(&options, Arc::new(|_| {})).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while link.info().is_none() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let info = link.info().unwrap();
+        let set = |alpha, timeout| {
+            if pane { link.set_pane_alpha(alpha, timeout) } else { link.set_gui_alpha(alpha, timeout) }
+        };
+        *link.shared.info.lock().unwrap() = Some(Info { flags: 0, ..info });
+        assert!(set(128, Duration::from_secs(2)).is_err());
+        *link.shared.info.lock().unwrap() = Some(info);
+        set(128, Duration::from_secs(2)).unwrap();
+        assert!(set(0, Duration::from_secs(2)).is_err());
+        assert!(link.alive());
+        let error = set(255, Duration::from_millis(100)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(!link.alive());
+        server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn configure_waits_for_matching_ack_and_gates_video() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let info = wire::Info { version: EP_VERSION, framebuffer_width: 1920, framebuffer_height: 1080,
+                flags: (EP_INFO_RECONFIG | EP_INFO_PANE_BGRA).into(), ..Default::default() };
+            stream.write_all(&bridge_frame(wire::envelope::Message::Info(info)).unwrap()).unwrap();
+            let mut requests = 0;
+            while requests < 4 {
+                let packet = read_packet(&mut stream);
+                let Some(wire::envelope::Message::Configure(_)) = packet.message else { continue; };
+                requests += 1;
+                let id: u32 = packet.id.unwrap().parse().unwrap();
+                if requests == 1 {
+                    stream.write_all(&ack_frame(id + 1, wire::envelope::Message::ConfigureAck(wire::Acknowledgement { status: 0 }))).unwrap();
+                }
+                let status = match requests { 2 => 1, 3 => 3, 4 => 2, _ => 0 };
+                stream.write_all(&ack_frame(id, wire::envelope::Message::ConfigureAck(wire::Acknowledgement { status }))).unwrap();
+            }
+        });
+        let options = LinkOptions {
+            addr: addr.to_string(), transport: LinkTransport::Tcp,
+            connect_timeout: Duration::from_secs(2), opentrack: None,
+            print_pose: false, head_tracking: false,
+        };
+        let link = Link::connect(&options, Arc::new(|_| {})).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while link.info().is_none() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let pane = Pane { x: 20, y: 30, width: 640, height: 480, format: PaneFormat::Bgra };
+        let config = StreamConfig { codec: EP_CODEC_H264, layout: EP_LAYOUT_MONO, pane: Some(pane) };
+        // Video is refused until a configuration is acknowledged.
+        assert!(link.send_video(1, EP_CODEC_H264, true, &[1]).is_err());
+        link.configure(config, Duration::from_secs(2)).unwrap();
+        link.send_video(2, EP_CODEC_H264, true, &[1]).unwrap();
+        // Invalid and unsupported requests leave the active stream usable.
+        assert!(link.configure(config, Duration::from_secs(2)).is_err());
+        assert!(link.alive());
+        link.send_video(3, EP_CODEC_H264, true, &[1]).unwrap();
+        assert!(link.configure(config, Duration::from_secs(2)).is_err());
+        assert!(link.alive());
+        // A failed restart closes the link.
+        assert!(link.configure(config, Duration::from_secs(2)).is_err());
+        assert!(!link.alive());
+        assert!(link.send_video(4, EP_CODEC_H264, true, &[1]).is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn configure_times_out_and_closes_the_link() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let info = wire::Info { version: EP_VERSION, framebuffer_width: 1920, framebuffer_height: 1080, ..Default::default() };
+            stream.write_all(&bridge_frame(wire::envelope::Message::Info(info)).unwrap()).unwrap();
+            loop {
+                if matches!(read_packet(&mut stream).message, Some(wire::envelope::Message::Configure(_))) { break; }
+            }
+            std::thread::sleep(Duration::from_millis(300));
+        });
+        let options = LinkOptions {
+            addr: addr.to_string(), transport: LinkTransport::Tcp,
+            connect_timeout: Duration::from_secs(2), opentrack: None,
+            print_pose: false, head_tracking: false,
+        };
+        let link = Link::connect(&options, Arc::new(|_| {})).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while link.info().is_none() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let config = StreamConfig { codec: EP_CODEC_H264, layout: EP_LAYOUT_MONO, pane: None };
+        let error = link.configure(config, Duration::from_millis(100)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(!link.alive());
+        server.join().unwrap();
+    }
+
     enum ReadStep {
         Data(Vec<u8>),
         Timeout,
@@ -587,6 +1100,29 @@ mod tests {
                 *byte = self.pending.pop_front().unwrap();
             }
             Ok(len)
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn usb_not_responding_is_fatal_but_read_poll_timeouts_are_not() {
+        use nusb::transfer::TransferError;
+
+        let error = usb_io_error(TransferError::Unknown(0xe00002ed).into());
+        assert_eq!(error.kind(), std::io::ErrorKind::ConnectionAborted);
+        assert!(error.to_string().contains("USB device not responding"));
+        assert!(error.to_string().contains("--transport adb"));
+
+        for error in [
+            std::io::Error::from(std::io::ErrorKind::TimedOut),
+            TransferError::Cancelled.into(),
+            TransferError::Unknown(0x1234).into(),
+        ] {
+            let kind = error.kind();
+            let message = error.to_string();
+            let mapped = usb_io_error(error);
+            assert_eq!(mapped.kind(), kind);
+            assert_eq!(mapped.to_string(), message);
         }
     }
 
@@ -670,6 +1206,10 @@ mod tests {
             info: Mutex::new(None),
             last_pose: Mutex::new(None),
             key_request: AtomicBool::new(false),
+            configure_ack: Mutex::new(None),
+            configure_cv: Condvar::new(),
+            gui_alpha_ack: Mutex::new(None),
+            gui_alpha_cv: Condvar::new(),
             unacked: AtomicU32::new(0),
             t_first_unacked: AtomicU64::new(0),
             last_forced_idr: AtomicU64::new(0),
@@ -685,6 +1225,11 @@ mod tests {
             transport_name: "TCP test".into(),
             selected_transport: LinkTransport::Tcp,
             shared,
+            configure_lock: Mutex::new(()),
+            next_configure_id: AtomicU32::new(1),
+            configured: AtomicBool::new(false),
+            gui_alpha_lock: Mutex::new(()),
+            next_gui_alpha_id: AtomicU32::new(1),
         });
 
         const THREADS: usize = 6;
@@ -692,23 +1237,19 @@ mod tests {
         const PAYLOAD_LEN: usize = 2048;
         let receive = thread::spawn(move || {
             for _ in 0..THREADS * MESSAGES_PER_THREAD {
-                let mut header_bytes = [0; HDR_LEN];
-                peer.read_exact(&mut header_bytes).unwrap();
-                let (message_type, _, len) = parse_header(&header_bytes).unwrap();
-                assert_eq!(message_type, 0x40);
-                assert_eq!(len as usize, PAYLOAD_LEN);
-                let mut payload = vec![0; len as usize];
-                peer.read_exact(&mut payload).unwrap();
-                assert!(payload.iter().all(|byte| *byte == payload[0]));
+                let packet = read_packet(&mut peer);
+                let Some(wire::envelope::Message::Video(message)) = packet.message else { panic!("expected video"); };
+                assert_eq!(message.access_unit.len(), PAYLOAD_LEN);
+                assert!(message.access_unit.iter().all(|byte| *byte == message.access_unit[0]));
             }
         });
         let senders: Vec<_> = (0..THREADS)
             .map(|thread_id| {
                 let link = link.clone();
                 thread::spawn(move || {
-                    let payload = vec![thread_id as u8; PAYLOAD_LEN];
+                    let payload = wire::Video { access_unit: vec![thread_id as u8; PAYLOAD_LEN], ..Default::default() };
                     for _ in 0..MESSAGES_PER_THREAD {
-                        link.send(0x40, 0, &payload).unwrap();
+                        link.send(wire::envelope::Message::Video(payload.clone())).unwrap();
                     }
                 })
             })

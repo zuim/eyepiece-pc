@@ -27,6 +27,19 @@ pub enum Target {
     Yuv420p,
 }
 
+/// Alpha source for a color-left, alpha-right packed video frame.
+#[derive(Debug, Clone, Copy)]
+pub enum PackedAlpha {
+    Opaque,
+    Source,
+    ColorKey {
+        rgb: u32,
+        similarity: f32,
+        blend: f32,
+        source_alpha: bool,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct ConvertConfig {
     pub width: u32,
@@ -42,6 +55,8 @@ pub struct ConvertConfig {
     pub extra_vf: Option<String>,
     /// scale_vaapi mode: hq (default) | fast | nl_anamorphic | default
     pub scale_mode: String,
+    /// Packed output width is twice the pane width. CPU frames only.
+    pub packed_alpha: Option<PackedAlpha>,
 }
 
 struct Graph {
@@ -161,11 +176,84 @@ impl Converter {
         s
     }
 
+    fn packed_alpha_chain(&self, alpha: PackedAlpha) -> Result<String, String> {
+        let (w, h) = (self.cfg.width, self.cfg.height);
+        if w == 0 || w % 4 != 0 || h == 0 || h % 2 != 0 {
+            return Err("packed alpha needs an encoded width divisible by 4 and an even height".into());
+        }
+        if self.cfg.extra_vf.is_some() {
+            return Err("packed alpha does not support custom video filters".into());
+        }
+        if let PackedAlpha::ColorKey { rgb, similarity, blend, .. } = alpha {
+            if rgb > 0xffffff
+                || !similarity.is_finite()
+                || !(0.0..=1.0).contains(&similarity)
+                || !blend.is_finite()
+                || !(0.0..=1.0).contains(&blend)
+            {
+                return Err("invalid color key: RGB must be 24-bit, similarity 0..1 and blend 0..1".into());
+            }
+        }
+        // Frame-sync filters require timestamps even when capture frames have none.
+        let mut chain = String::from("setpts=N,format=rgba");
+        if matches!(alpha, PackedAlpha::Opaque | PackedAlpha::ColorKey { source_alpha: false, .. }) {
+            chain += ",lutrgb=a=255";
+        }
+        if let PackedAlpha::ColorKey { rgb, similarity, blend, .. } = alpha {
+            // FFmpeg's blend extends beyond similarity; keep it inside our tolerance.
+            let radius = similarity.max(0.00001);
+            let inner = (radius * (1.0 - blend)).max(0.00001);
+            let softness = radius - inner;
+            chain += &format!(
+                ",split=3[color][source_alpha][key];\
+                 [source_alpha]alphaextract[original_alpha];\
+                 [key]colorkey=color=0x{rgb:06x}:similarity={inner}:blend={softness},alphaextract[key_alpha];\
+                 [original_alpha][key_alpha]blend=all_mode=multiply[mask];\
+                 [color][mask]alphamerge,format=rgba"
+            );
+        }
+        let pane_w = w / 2;
+        if self.cfg.letterbox {
+            chain += &format!(
+                ",scale=w={pane_w}:h={h}:flags=bicubic:threads={SWS_THREADS}:force_original_aspect_ratio=decrease:force_divisible_by=2,\
+                 pad=w={pane_w}:h={h}:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0"
+            );
+        } else {
+            chain += &format!(",scale=w={pane_w}:h={h}:flags=bicubic:threads={SWS_THREADS}");
+        }
+        chain += ",format=rgba,split[color][alpha];\
+            [color]format=rgb24[c];[alpha]alphaextract,format=rgb24[a]";
+        chain += ";[c][a]hstack=inputs=2,scale=out_color_matrix=bt709:out_range=tv";
+        chain += if self.cfg.target == Target::Yuv420p {
+            ",format=yuv420p"
+        } else {
+            ",format=nv12"
+        };
+        if self.cfg.target == Target::Vaapi {
+            chain += ",hwupload";
+        }
+        Ok(chain)
+    }
+
     fn build(&mut self, f: &Frame) -> Result<Graph, String> {
         let (w, h, fmt) = (f.width(), f.height(), f.format());
         let hw_in = unsafe { (*f.0).hw_frames_ctx };
         let is_drm = fmt == AVPixelFormat::AV_PIX_FMT_DRM_PRIME as i32;
-        let chain = if is_drm {
+        let chain = if let Some(alpha) = self.cfg.packed_alpha {
+            if !hw_in.is_null() || is_drm {
+                return Err("packed alpha requires CPU capture; hardware surfaces may have lost alpha".into());
+            }
+            if matches!(alpha, PackedAlpha::Source | PackedAlpha::ColorKey { source_alpha: true, .. }) {
+                let desc = unsafe { av_pix_fmt_desc_get(std::mem::transmute::<i32, AVPixelFormat>(fmt)) };
+                if desc.is_null() || unsafe { (*desc).flags & AV_PIX_FMT_FLAG_ALPHA as u64 == 0 } {
+                    return Err(format!(
+                        "packed source alpha requires an alpha-capable input, got {}",
+                        pix_fmt_name(fmt)
+                    ));
+                }
+            }
+            self.packed_alpha_chain(alpha)?
+        } else if is_drm {
             format!(
                 "hwmap=derive_device=vaapi:mode=read,{}",
                 self.vaapi_chain(w, h)
@@ -278,11 +366,12 @@ impl Converter {
     /// Convert one frame (consumed). Returns the encoder-ready frame.
     pub fn convert(&mut self, f: Frame) -> Result<Option<Frame>, String> {
         if f.format() == AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX as i32 {
-            if self.cfg.target != Target::VideoToolbox
+            if self.cfg.packed_alpha.is_some()
+                || self.cfg.target != Target::VideoToolbox
                 || self.cfg.extra_vf.is_some()
                 || (f.width() as u32, f.height() as u32) != (self.cfg.width, self.cfg.height)
             {
-                return Err("Native VideoToolbox surfaces require matching output size, a VideoToolbox encoder, and no --vf; use CPU capture for custom conversion".into());
+                return Err("Native VideoToolbox surfaces require matching output size, a VideoToolbox encoder, no packed alpha, and no --vf; use CPU capture for custom conversion".into());
             }
             self.graph = None;
             let out = Frame::alloc();
@@ -460,6 +549,7 @@ mod tests {
             gpu_scale_cpu_input: false,
             extra_vf: None,
             scale_mode: "hq".into(),
+            packed_alpha: None,
         }
     }
 
@@ -569,5 +659,220 @@ mod tests {
         assert_eq!(result.format(), AVPixelFormat::AV_PIX_FMT_NV12 as i32);
         assert_eq!((result.width(), result.height()), (64, 32));
         assert!(unsafe { (*result.0).hw_frames_ctx.is_null() });
+    }
+
+    fn rgba_frame() -> Frame {
+        let frame = Frame::alloc();
+        unsafe {
+            (*frame.0).width = 64;
+            (*frame.0).height = 32;
+            (*frame.0).format = AVPixelFormat::AV_PIX_FMT_RGBA as i32;
+            check(av_frame_get_buffer(frame.0, 32), "allocate RGBA test frame").unwrap();
+            for y in 0..32 {
+                let row = (*frame.0).data[0].add(y * (*frame.0).linesize[0] as usize);
+                for x in 0..64 {
+                    let pixel = row.add(x * 4);
+                    let rgba = if x < 16 { [0, 255, 0, 255] }
+                        else if x < 32 { [255, 0, 0, 128] }
+                        else if x < 48 { [255, 0, 0, 0] }
+                        else { [255, 0, 0, 255] };
+                    std::ptr::copy_nonoverlapping(rgba.as_ptr(), pixel, 4);
+                }
+            }
+        }
+        frame
+    }
+
+    fn packed_config(alpha: PackedAlpha) -> ConvertConfig {
+        let mut settings = config();
+        settings.width = 128;
+        settings.target = Target::Nv12;
+        settings.packed_alpha = Some(alpha);
+        settings
+    }
+
+    #[test]
+    fn packs_source_alpha_as_limited_range_luma() {
+        let mut converter = Converter::new(packed_config(PackedAlpha::Source), 60);
+        let result = converter.convert(rgba_frame()).unwrap().unwrap();
+        assert_eq!((result.width(), result.height()), (128, 32));
+        unsafe {
+            let row = (*result.0).data[0].add(16 * (*result.0).linesize[0] as usize);
+            assert!((*row.add(64 + 8) as i32 - 235).abs() <= 1);
+            assert!((*row.add(64 + 24) as i32 - 126).abs() <= 2, "alpha luma: {}", *row.add(64 + 24));
+            assert!((*row.add(64 + 40) as i32 - 16).abs() <= 1);
+            assert!((*row.add(64 + 48) as i32 - 235).abs() <= 1);
+            assert!(*row.add(8) > *row.add(48)); // green has greater BT.709 luma than red
+        }
+    }
+
+    #[test]
+    fn packs_color_key_and_rejects_missing_source_alpha() {
+        let mut converter = Converter::new(packed_config(PackedAlpha::ColorKey {
+            rgb: 0x00ff00, similarity: 0.01, blend: 0.0, source_alpha: true,
+        }), 60);
+        for _ in 0..3 {
+            let result = converter.convert(rgba_frame()).unwrap().unwrap();
+            unsafe {
+                let row = (*result.0).data[0].add(16 * (*result.0).linesize[0] as usize);
+                assert!((*row.add(64 + 8) as i32 - 16).abs() <= 1);
+                assert!((*row.add(64 + 24) as i32 - 126).abs() <= 2);
+                assert!((*row.add(64 + 40) as i32 - 16).abs() <= 1);
+                assert!((*row.add(64 + 48) as i32 - 235).abs() <= 1);
+            }
+        }
+        assert!(Converter::new(packed_config(PackedAlpha::Source), 60).convert(cpu_frame()).is_err());
+        let mut invalid = packed_config(PackedAlpha::Source);
+        invalid.width = 126;
+        assert!(Converter::new(invalid, 60).convert(rgba_frame()).is_err());
+        let invalid = packed_config(PackedAlpha::ColorKey {
+            rgb: 0x00ff00, similarity: f32::NAN, blend: 0.0, source_alpha: false,
+        });
+        assert!(Converter::new(invalid, 60).convert(rgba_frame()).is_err());
+    }
+
+    #[test]
+    fn color_key_matches_exact_rgb_or_nearby_colors_with_tolerance() {
+        for (similarity, expected_near_alpha) in [(0.0, 235), (0.01, 16)] {
+            let frame = rgba_frame();
+            unsafe {
+                for y in 0..32 {
+                    let row = (*frame.0).data[0].add(y * (*frame.0).linesize[0] as usize);
+                    for x in 16..32 {
+                        std::ptr::copy_nonoverlapping([0, 254, 0, 255].as_ptr(), row.add(x * 4), 4);
+                    }
+                }
+            }
+            let mut converter = Converter::new(packed_config(PackedAlpha::ColorKey {
+                rgb: 0x00ff00, similarity, blend: 0.0, source_alpha: true,
+            }), 60);
+            let result = converter.convert(frame).unwrap().unwrap();
+            unsafe {
+                let row = (*result.0).data[0].add(16 * (*result.0).linesize[0] as usize);
+                assert!((*row.add(64 + 8) as i32 - 16).abs() <= 1);
+                assert!((*row.add(64 + 24) as i32 - expected_near_alpha).abs() <= 1);
+            }
+        }
+    }
+
+    #[test]
+    fn key_softness_never_makes_distant_colors_transparent() {
+        for (tolerance, blend, near_is_soft) in [(0.05, 1.0, true), (0.05, 0.0, false), (0.0, 1.0, false)] {
+            let frame = rgba_frame();
+            unsafe {
+                for y in 0..32 {
+                    let row = (*frame.0).data[0].add(y * (*frame.0).linesize[0] as usize);
+                    for x in 0..64 {
+                        let rgba = if x < 16 { [0, 255, 0, 255] }
+                            else if x < 32 { [0, 254, 0, 255] }
+                            else if x < 48 { [0, 220, 0, 255] }
+                            else { [255, 0, 0, 255] };
+                        std::ptr::copy_nonoverlapping(rgba.as_ptr(), row.add(x * 4), 4);
+                    }
+                }
+            }
+            let mut converter = Converter::new(packed_config(PackedAlpha::ColorKey {
+                rgb: 0x00ff00, similarity: tolerance, blend, source_alpha: false,
+            }), 60);
+            let result = converter.convert(frame).unwrap().unwrap();
+            unsafe {
+                let row = (*result.0).data[0].add(16 * (*result.0).linesize[0] as usize);
+                let alpha = |x: usize| *row.add(64 + x) as i32;
+                assert!((alpha(8) - 16).abs() <= 1);
+                if near_is_soft {
+                    assert!(alpha(24) > 16 && alpha(24) < 235, "near alpha: {}", alpha(24));
+                } else if tolerance == 0.0 {
+                    assert!((alpha(24) - 235).abs() <= 1);
+                } else {
+                    assert!((alpha(24) - 16).abs() <= 1);
+                }
+                assert!((alpha(40) - 235).abs() <= 1, "outside tolerance: {}", alpha(40));
+                assert!((alpha(56) - 235).abs() <= 1, "unrelated color: {}", alpha(56));
+            }
+        }
+    }
+
+    #[test]
+    fn key_tolerance_uses_normalized_rgb_distance_at_boundary() {
+        let frame = rgba_frame();
+        unsafe {
+            for y in 0..32 {
+                let row = (*frame.0).data[0].add(y * (*frame.0).linesize[0] as usize);
+                for x in 0..64 {
+                    let rgba = if x < 16 { [0, 233, 0, 255] }
+                        else if x < 32 { [0, 232, 0, 255] }
+                        else if x < 48 { [15, 240, 0, 255] }
+                        else { [16, 239, 0, 255] };
+                    std::ptr::copy_nonoverlapping(rgba.as_ptr(), row.add(x * 4), 4);
+                }
+            }
+        }
+        let mut converter = Converter::new(packed_config(PackedAlpha::ColorKey {
+            rgb: 0x00ff00, similarity: 0.05, blend: 0.0, source_alpha: false,
+        }), 60);
+        let result = converter.convert(frame).unwrap().unwrap();
+        unsafe {
+            let row = (*result.0).data[0].add(16 * (*result.0).linesize[0] as usize);
+            let alpha = |x: usize| *row.add(64 + x) as i32;
+            assert!((alpha(8) - 16).abs() <= 1);
+            assert!((alpha(24) - 235).abs() <= 1);
+            assert!((alpha(40) - 16).abs() <= 1);
+            assert!((alpha(56) - 235).abs() <= 1);
+        }
+    }
+
+    #[test]
+    fn color_key_mask_is_created_before_scaling() {
+        let frame = rgba_frame();
+        unsafe {
+            for y in 0..32 {
+                let row = (*frame.0).data[0].add(y * (*frame.0).linesize[0] as usize);
+                for x in 0..64 {
+                    let rgba = if x % 2 == 0 { [0, 255, 0, 255] } else { [255, 0, 0, 255] };
+                    std::ptr::copy_nonoverlapping(rgba.as_ptr(), row.add(x * 4), 4);
+                }
+            }
+        }
+        let mut settings = packed_config(PackedAlpha::ColorKey {
+            rgb: 0x00ff00, similarity: 0.0, blend: 0.0, source_alpha: true,
+        });
+        settings.width = 64;
+        settings.height = 16;
+        settings.letterbox = false;
+        let result = Converter::new(settings, 60).convert(frame).unwrap().unwrap();
+        unsafe {
+            let row = (*result.0).data[0].add(8 * (*result.0).linesize[0] as usize);
+            let alpha = *row.add(32 + 16) as i32;
+            assert!((alpha - 126).abs() <= 3, "scaled alpha luma: {alpha}");
+        }
+    }
+
+    #[test]
+    fn opaque_pane_ignores_input_alpha() {
+        let mut converter = Converter::new(packed_config(PackedAlpha::Opaque), 60);
+        let result = converter.convert(rgba_frame()).unwrap().unwrap();
+        unsafe {
+            let row = (*result.0).data[0].add(16 * (*result.0).linesize[0] as usize);
+            assert!((*row.add(64 + 40) as i32 - 235).abs() <= 1);
+        }
+    }
+
+    #[test]
+    fn packed_letterbox_is_transparent() {
+        for alpha in [
+            PackedAlpha::Source,
+            PackedAlpha::ColorKey { rgb: 0x00ff00, similarity: 0.0, blend: 0.0, source_alpha: true },
+        ] {
+            let mut settings = packed_config(alpha);
+            settings.height = 64;
+            let mut converter = Converter::new(settings, 60);
+            let result = converter.convert(rgba_frame()).unwrap().unwrap();
+            unsafe {
+                let top = (*result.0).data[0];
+                let middle = top.add(32 * (*result.0).linesize[0] as usize);
+                assert!((*top.add(64 + 48) as i32 - 16).abs() <= 1);
+                assert!((*middle.add(64 + 48) as i32 - 235).abs() <= 1);
+            }
+        }
     }
 }

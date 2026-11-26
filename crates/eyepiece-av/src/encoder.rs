@@ -136,7 +136,11 @@ pub fn probe(name: &str, vaapi_device: &str) -> bool {
             }
             (*ctx).width = 640;
             (*ctx).height = 480;
-            (*ctx).pix_fmt = AVPixelFormat::AV_PIX_FMT_NV12;
+            (*ctx).pix_fmt = if family(name) == Family::X265 {
+                AVPixelFormat::AV_PIX_FMT_YUV420P
+            } else {
+                AVPixelFormat::AV_PIX_FMT_NV12
+            };
             (*ctx).time_base = AVRational { num: 1, den: 60 };
             (*ctx).framerate = AVRational { num: 60, den: 1 };
             let prev = av_log_get_level();
