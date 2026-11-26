@@ -28,16 +28,20 @@ Linux builds the CLI with KMS, X11 and (by default) PipeWire capture. See
 
 ## Windows
 
-Install LLVM (for libclang), unpack a BtbN FFmpeg 9 *shared* build
-(`ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip`), then
+Install once: [rustup](https://rustup.rs) (MSVC toolchain, with Visual Studio 2022 or its Build Tools,
+"Desktop development with C++"), [LLVM](https://github.com/llvm/llvm-project/releases) (libclang, found in
+`C:\Program Files\LLVM` by itself), Node.js 24 or newer for the web UI, and `adb` on `PATH`. Then:
 
 ```pwsh
-$env:FFMPEG_INCLUDE_DIR = "C:\ffmpeg\include"; $env:FFMPEG_LIB_DIR = "C:\ffmpeg\lib"
-$env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
-cargo build --release      # put C:\ffmpeg\bin (the DLLs) on PATH or next to the .exe
+cargo build --release                    # → target\release\eyepiece-pc.exe, FFmpeg DLLs next to it
+cd web; npx -y pnpm@10 install --frozen-lockfile; npx -y pnpm@10 build; cd ..   # → web\build
+target\release\eyepiece-pc.exe --web     # then open http://127.0.0.1:4174/
 ```
 
-The Windows (DXGI) path builds in CI but has never been run.
+FFmpeg needs no setup: the first build downloads the pinned BtbN FFmpeg 9 shared build (about 85 MB,
+sha256-checked; the same one CI uses) into `target\ffmpeg` and copies its DLLs next to the binaries and
+tests. To use another FFmpeg, set `FFMPEG_INCLUDE_DIR` and `FFMPEG_LIB_DIR`. Node.js 25 and later no
+longer ship corepack, hence `npx pnpm@10`.
 
 ## macOS
 
