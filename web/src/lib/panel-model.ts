@@ -87,7 +87,7 @@ export const choiceLabels: Record<string, Record<string, string>> = {
 };
 export const settingGroups = [
   ["Connection", ["transport", "host", "port", "serial", "adb", "no_forward", "no_connect", "reconnect"]],
-  ["Bridge", ["no_deploy", "bridge", "bridge_args", "stop_bridge"]],
+  ["Bridge", ["no_deploy", "bridge_args", "stop_bridge"]],
   [
     "Capture",
     [

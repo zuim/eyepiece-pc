@@ -8,7 +8,6 @@
     {"name":"transport","group":"Transport","description":"Connection","type":"choice","default":"auto","choices":["auto","usb-bulk","adb"]},
     {"name":"no_forward","group":"Transport","description":"Do not create adb forward","type":"boolean","default":false},
     {"name":"no_deploy","group":"Transport","description":"Use running bridge","type":"boolean","default":false},
-    {"name":"bridge","group":"Transport","description":"Bridge executable","type":"optional_string","default":null},
     {"name":"bridge_args","group":"Transport","description":"Bridge arguments","type":"string","default":""},
     {"name":"stop_bridge","group":"Transport","description":"Stop bridge on quit","type":"boolean","default":false},
     {"name":"reconnect","group":"Transport","description":"Reconnect after disconnect","type":"boolean","default":false},
