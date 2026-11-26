@@ -18,7 +18,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     future::IntoFuture,
     net::{Ipv4Addr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -70,6 +70,26 @@ fn origin(value: &str) -> Result<(String, String), String> {
     }
     let authority = uri.authority().unwrap().as_str().to_string();
     Ok((format!("http://{authority}"), authority))
+}
+
+/// The static web app: EYEPIECE_WEB_DIR if set; otherwise `web/` next to the executable (release
+/// packages), then `web/build` of the checkout this binary was built from (development builds).
+fn web_dir() -> Result<PathBuf, String> {
+    if let Some(dir) = std::env::var_os("EYEPIECE_WEB_DIR").map(PathBuf::from) {
+        return if dir.is_dir() { Ok(dir) } else { Err(format!("EYEPIECE_WEB_DIR {} does not exist", dir.display())) };
+    }
+    let packaged = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("web")));
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/build");
+    packaged
+        .into_iter()
+        .chain([checkout.clone()])
+        .find(|dir| dir.join("index.html").is_file())
+        .ok_or_else(|| {
+            format!(
+                "the web UI is not built: run `pnpm install && pnpm build` in {} (or set EYEPIECE_WEB_DIR)",
+                checkout.parent().unwrap().display()
+            )
+        })
 }
 
 fn configured_port() -> Result<u16, String> {
@@ -470,15 +490,7 @@ pub(super) fn run(
         Err(std::env::VarError::NotPresent) => {}
         Err(error) => return Err(format!("invalid EYEP_DEV_ORIGIN: {error}")),
     }
-    let site = std::env::var_os("EYEPIECE_WEB_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("web/build"));
-    if !site.is_dir() {
-        return Err(format!(
-            "web build directory {} does not exist",
-            site.display()
-        ));
-    }
+    let site = web_dir()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

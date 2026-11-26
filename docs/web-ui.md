@@ -9,8 +9,9 @@ target/release/eyepiece-pc --web         # then open http://127.0.0.1:4174/
 ```
 
 `EYEPIECE_PORT` changes the loopback port. CLI options given with `--web` override and persist the
-corresponding saved settings. The static app is read from `web/build` relative to the current directory;
-set `EYEPIECE_WEB_DIR` to its path when starting from elsewhere.
+corresponding saved settings. The static app is read from `web/` next to the executable, else from
+`web/build` of the checkout the binary was built from, so it can be started from any directory;
+`EYEPIECE_WEB_DIR` points it elsewhere.
 
 ## Using it
 
