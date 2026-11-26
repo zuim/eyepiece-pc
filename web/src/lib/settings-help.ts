@@ -6,7 +6,6 @@ export const settingsHelp: Record<string, string> = {
   transport: "Automatic prefers USB bulk, then adb; other choices require that transport.",
   no_forward: "Skip adb port forwarding when the bridge is directly reachable or forwarding is already configured.",
   no_deploy: "Use a bridge already running on the goggles instead of starting one.",
-  bridge: "Path to the bridge executable to deploy; leave empty to use automatic discovery.",
   bridge_args: "Extra arguments passed to the bridge when it is started.",
   stop_bridge: "Ask the bridge to exit when the session stops.",
   reconnect: "Keep trying to reconnect after the bridge disconnects.",
