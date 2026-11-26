@@ -1,6 +1,6 @@
 # Bridge protocol (PC ↔ goggles)
 
-The bridge protocol connects `eyepiece-pc` to `eyepiece_bridge` on the goggles. It
+The bridge protocol connects `eyepiece-pc` to the bridge on the goggles (`pcdisplay_bridge` of tinkerglass's PC Display mod; the natartos-era `eyepiece_bridge` speaks the same protocol). It
 carries encoded video to the goggles and head pose, timing and display
 feedback back. This page is the behavioural specification;
 [`contract/eyepiece-rpc.proto`](../../contract/eyepiece-rpc.proto) is the canonical
@@ -34,7 +34,7 @@ byte stream.
 | Transport | Address | Notes |
 |---|---|---|
 | TCP | `127.0.0.1:42420` on the goggles | Reached through `adb forward tcp:42420 tcp:42420`, the default. `-A` listens on all interfaces for a directly reachable bridge (`--host`). |
-| USB bulk | FunctionFS interface `ffs.eyepiece` | Bridge started with `-B`; experimental. See [transports](../transports.md). |
+| USB bulk | vendor interface of the goggles' USB mode | tinkerglass: interface class/subclass/protocol `ff/54/03` ("tinkerglass video"), one bulk OUT and one bulk IN endpoint, no bridge option; the natartos bridge used its own `ffs.eyepiece` interface with `-B`. See [transports](../transports.md). |
 
 Every record is:
 
@@ -145,7 +145,7 @@ configured state.
 ```mermaid
 sequenceDiagram
     participant PC as eyepiece-pc
-    participant B as eyepiece_bridge
+    participant B as bridge
     B->>PC: Info (version, panel, capabilities)
     PC->>B: GuiAlpha(id 1)
     B->>PC: GuiAlphaAck(id 1, 0)
@@ -307,7 +307,7 @@ message Acknowledgement { uint32 status = 2; }
 | `GuiAlpha` | applied | alpha > 255 | the overlay mod could not apply it |
 | `PaneAlpha` | applied | alpha > 255 | no pane is active, or the display refused it |
 
-- `GuiAlpha` needs the overlay mod and `CAPABILITY_GUI_ALPHA`. It is acknowledged only
+- `GuiAlpha` needs `CAPABILITY_GUI_ALPHA` (the natartos overlay mod; tinkerglass's bridge does not advertise it because it hides the GUI while a stream is configured, and the PC then sends no `GuiAlpha`). It is acknowledged only
   after the display API has succeeded. Fullscreen GUI hiding takes precedence.
 - `PaneAlpha` needs `CAPABILITY_PANE_ALPHA`. It multiplies decoded pixel alpha by
   `alpha / 255`, with rounding. For opaque panes it is the hardware global alpha; for
@@ -403,9 +403,9 @@ it names; the PC does.
 | `CAPABILITY_PANE_NV12` | `0x002` | Reserved; never advertised. |
 | `CAPABILITY_PANE_BGRA` | `0x004` | Packed-alpha pane (`format 1`). |
 | `CAPABILITY_PANE_OPAQUE_BGRA` | `0x008` | Opaque pane (`format 2`). |
-| `CAPABILITY_PANE_RECONNECT` | `0x010` | The bridge was started with `-R` and retains a pane across clients. |
+| `CAPABILITY_PANE_RECONNECT` | `0x010` | The bridge was started with `-R` and retains a pane across clients. Not advertised by tinkerglass's bridge: a disconnect releases everything. |
 | `CAPABILITY_RECONFIG` | `0x020` | A later `Configure` may replace a running GFX1 stream. Without it, only the first `Configure` of a connection is accepted by the PC. |
-| `CAPABILITY_GUI_ALPHA` | `0x040` | `GuiAlpha` is supported (overlay mod present). |
+| `CAPABILITY_GUI_ALPHA` | `0x040` | `GuiAlpha` is supported (natartos overlay mod present). Not advertised by tinkerglass's bridge. |
 | `CAPABILITY_GUI_ALPHA_ACTIVE` | `0x080` | A GUI opacity request is currently retained; the PC must apply its own value. |
 | `CAPABILITY_PANE_ALPHA` | `0x100` | `PaneAlpha` is supported. |
 
