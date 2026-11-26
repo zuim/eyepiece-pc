@@ -304,33 +304,41 @@ fn connect(cfg: &mut Config, enc: &EncoderConfig, ev: &Events) -> Result<Option<
         l.close();
         return Err("bridge did not provide compatible protobuf protocol information; update the bridge".into());
     }
-    if cfg.gui_opacity != 100 || l.info().is_some_and(|i| i.flags & proto::EP_INFO_GUI_ALPHA_ACTIVE != 0) {
-        l.set_gui_alpha(gui_alpha(cfg.gui_opacity), Duration::from_secs(3))
-            .map_err(|e| format!("GUI opacity: {e}"))?;
+    let flags = l.info().map_or(0, |i| i.flags);
+    match gui_alpha_action(flags, cfg.gui_opacity) {
+        GuiAlphaAction::Nothing => {}
+        GuiAlphaAction::Send => l
+            .set_gui_alpha(gui_alpha(cfg.gui_opacity), Duration::from_secs(3))
+            .map_err(|e| format!("GUI opacity: {e}"))?,
+        GuiAlphaAction::Unsupported => {
+            // tinkerglass's bridge hides the DJI GUI completely while a stream is configured
+            (ev.log)(format!(
+                "NOTICE: this bridge cannot change the DJI GUI's opacity; --gui-opacity {} is ignored",
+                cfg.gui_opacity
+            ));
+            cfg.gui_opacity = 100;
+        }
     }
     if cfg.video {
         if cfg.stereo || cfg.pane.is_some() {
-            // EP_INFO comes right after the connect: only stereo-capable bridges get SBS
-            let t0 = std::time::Instant::now();
-            while l.info().is_none() && t0.elapsed() < Duration::from_secs(2) {
-                std::thread::sleep(Duration::from_millis(20));
+            if cfg.stereo && flags & proto::EP_INFO_STEREO == 0 {
+                return Err("this bridge has no stereo support (update tinkerglass's PC Display)".into());
             }
-            if cfg.stereo && l.info().is_none_or(|i| i.flags & proto::EP_INFO_STEREO == 0) {
-                return Err("this eyepiece_bridge has no stereo support (needs natartos \
-                            v0.1.0-eyepiece.5 or newer, or --bridge with a current build)"
-                    .into());
-            }
-            if cfg.pane.is_some() && cfg.reconnect && l.info().is_none_or(|i| i.flags & proto::EP_INFO_PANE_RECONNECT == 0) {
-                return Err("this eyepiece_bridge does not support GFX1 reconnect; start a current bridge with -R".into());
+            if cfg.pane.is_some() && cfg.reconnect && flags & proto::EP_INFO_PANE_RECONNECT == 0 {
+                (ev.log)(
+                    "NOTICE: this bridge keeps no pane across a disconnect (no PANE_RECONNECT); \
+                     a reconnect sets the pane up again"
+                        .into(),
+                );
             }
         }
         let configured = l
             .configure(stream_config(cfg, enc.codec.wire()), Duration::from_secs(5))
             .map_err(|e| format!("stream configuration: {e}"))
             .and_then(|()| {
-                if cfg.pane.is_some()
-                    && (cfg.pane_opacity != 100 || l.info().is_some_and(|i| i.flags & proto::EP_INFO_PANE_ALPHA != 0))
-                {
+                if cfg.pane.is_some() && flags & proto::EP_INFO_PANE_ALPHA == 0 && cfg.pane_opacity != 100 {
+                    (ev.log)("NOTICE: this bridge cannot change the pane opacity; --pane-opacity is ignored".into());
+                } else if cfg.pane.is_some() && flags & proto::EP_INFO_PANE_ALPHA != 0 {
                     l.set_pane_alpha(gui_alpha(cfg.pane_opacity), Duration::from_secs(3))
                         .map_err(|e| format!("pane opacity: {e}"))?;
                 }
@@ -343,6 +351,22 @@ fn connect(cfg: &mut Config, enc: &EncoderConfig, ev: &Events) -> Result<Option<
     }
     ev.link_changed(Some(l.clone()));
     Ok(Some(l))
+}
+
+/// What to do about the DJI GUI opacity on connecting to a bridge advertising `flags`.
+#[derive(Debug, PartialEq, Eq)]
+enum GuiAlphaAction {
+    Nothing,
+    Send,
+    /// asked for something other than opaque, but the bridge has no GUI alpha
+    Unsupported,
+}
+
+fn gui_alpha_action(flags: u32, opacity: u8) -> GuiAlphaAction {
+    if flags & proto::EP_INFO_GUI_ALPHA == 0 {
+        return if opacity != 100 { GuiAlphaAction::Unsupported } else { GuiAlphaAction::Nothing };
+    }
+    if opacity != 100 || flags & proto::EP_INFO_GUI_ALPHA_ACTIVE != 0 { GuiAlphaAction::Send } else { GuiAlphaAction::Nothing }
 }
 
 fn gui_alpha(opacity: u8) -> u8 {
@@ -895,6 +919,18 @@ mod tests {
         assert_eq!(gui_alpha(0), 0);
         assert_eq!(gui_alpha(50), 128);
         assert_eq!(gui_alpha(100), 255);
+    }
+
+    #[test]
+    fn missing_gui_alpha_is_not_an_error() {
+        use proto::{EP_INFO_GUI_ALPHA as A, EP_INFO_GUI_ALPHA_ACTIVE as ACTIVE};
+        // tinkerglass's bridge: neither GUI_ALPHA nor GUI_ALPHA_ACTIVE
+        assert_eq!(gui_alpha_action(proto::EP_INFO_PANE_ALPHA, 100), GuiAlphaAction::Nothing);
+        assert_eq!(gui_alpha_action(proto::EP_INFO_PANE_ALPHA, 50), GuiAlphaAction::Unsupported);
+        // a bridge with GUI alpha: only sent when needed
+        assert_eq!(gui_alpha_action(A, 100), GuiAlphaAction::Nothing);
+        assert_eq!(gui_alpha_action(A, 50), GuiAlphaAction::Send);
+        assert_eq!(gui_alpha_action(A | ACTIVE, 100), GuiAlphaAction::Send);
     }
 
     #[test]
