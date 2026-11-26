@@ -2,9 +2,10 @@
 
 ## Linux and the common setup
 
-With Nix, `nix build` builds the workspace binaries. The package supports Linux
-and Apple Silicon macOS; Intel macOS lacks a Swift 6 package in the pinned
-nixpkgs. `nix develop` provides a development shell.
+With Nix, `nix develop` opens a shell with the toolchain and libraries (Rust, FFmpeg, libclang,
+pkg-config, the Linux capture libraries or Swift and the macOS SDK, Node.js and pnpm). The build inside
+it is the regular one below; the flake defines no package of its own. Intel macOS lacks a Swift 6
+package in the pinned nixpkgs.
 
 Linux (Debian/Ubuntu package names; FFmpeg 9 headers, tested with 9.0.2):
 
