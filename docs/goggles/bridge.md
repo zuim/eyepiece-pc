@@ -1,23 +1,27 @@
-# Goggles side: the Eyepiece mod and bridge
+# Goggles side: the PC Display mod and bridge
 
-The goggles half of Eyepiece lives in the [natartos](https://github.com/zuim/natartos)
-repository (`mods/eyepiece`, a fork of grom-labs' natartos). It consists of the
-**Eyepiece mod**, which adds a menu entry and hooks the DJI GUI, and
-**`eyepiece_bridge`**, a native binary that receives the video stream, decodes it in
-hardware, drives the display and returns head tracking. This page documents both from
-the PC project's point of view. The wire format is in the [bridge protocol](../protocol/bridge.md);
-how the display composes layers is in [display composition](display-composition.md).
+The goggles half lives in [tinkerglass](https://github.com/tinkerglass-org/tinkerglass), the Goggles 3 mod
+platform. Its **PC Display** mod adds *PC Display* to the goggles' More menu and ships
+**`pcdisplay_bridge`**, a native binary that receives the video stream, decodes it in hardware, drives the
+display and returns head tracking. This page documents it from the PC project's point of view. The wire format is
+in the [bridge protocol](../protocol/bridge.md); how the display composes layers is in
+[display composition](display-composition.md).
 
 ```
-PC ──adb forward tcp:42420──► eyepiece_bridge ──► VC8000D decode ──► VIDEO0 or GFX1 plane ──► display
-PC ◄──── head pose / frame stats ──── eyepiece_bridge ◄── MCU head attitude (100 Hz)
+PC ──USB video interface (or adb forward tcp:42420)──► pcdisplay_bridge ──► VC8000D decode ──► VIDEO0 or GFX1 plane
+PC ◄──── head pose / frame stats ──── pcdisplay_bridge ◄── MCU head attitude (100 Hz)
 ```
 
-Developed and tested on firmware **01.00.1600**. Everything here is experimental; **never use it while
-flying**.
+Everything here is experimental; **never use it while flying.**
+
+The sections after [tinkerglass differences](#tinkerglass-differences) (display modes, options, internals, USB
+bulk) were written for the natartos-era bridge (`eyepiece_bridge`, which put the stream on the display through a
+hook in the DJI GUI). The protocol, the display planes and the stream behaviour are the same; the differences are
+listed under tinkerglass differences and win where they disagree.
 
 - [Requirements](#requirements)
 - [Starting the bridge](#starting-the-bridge)
+- [tinkerglass differences](#tinkerglass-differences)
 - [Display modes](#display-modes)
 - [Bridge options](#bridge-options)
 - [Safety](#safety)
@@ -28,35 +32,37 @@ flying**.
 
 ## Requirements
 
-- The natartos **overlay** mod, for display integration and GUI opacity. The DJI GUI stays
-  visible by default.
-- Root ADB on the goggles, as set up by [toolya](https://toolya.dev)'s root session. `adb
-  forward` carries the stream.
-- SELinux permissive, as the toolya root session sets it. The bridge has not been tested with
-  SELinux enforcing.
+- tinkerglass installed on the goggles with the **PC Display** mod, and its mods running (install and start steps
+  are in the tinkerglass documentation).
+- `adb` on the PC. In tinkerglass's USB mode the video stream travels over the goggles' own USB interface and
+  `adb` only starts the bridge; without that mode `adb forward` carries the stream.
 - The PC side, **eyepiece-pc** (this repository).
 
 ## Starting the bridge
 
-There are three ways, from most to least automatic.
+1. **From the PC (default).** `eyepiece-pc` writes a launch request for tinkerglass's menu service
+   (`/data/vendor/tinkerglass/run/menu/launch.req`, content `pcdisplay -1 -l <log> <args>`), so the bridge starts as
+   from the goggles' menu. It exits with the PC session (`-1`). A bridge already running from the menu hands over by
+   itself. Nothing is pushed to the goggles; if the mod is not installed, or the tinkerglass mods are not running,
+   `eyepiece-pc` stops with a message saying so. See the [CLI guide](../usage.md).
+2. **From the goggles' menu.** **More → PC Display**, then `eyepiece-pc --no-deploy` (and
+   `adb forward tcp:42420 tcp:42420` when not using the USB interface).
+3. **By hand** from `adb shell`: `/vendor/tinkerglass/current/mods/pcdisplay/bin/pcdisplay_bridge -h` lists the
+   options. A bridge started from the ADB shell runs in another SELinux domain than the menu's; prefer 1 or 2.
 
-1. **From the PC (default).** `eyepiece-pc` pushes a local `eyepiece_bridge` (or the one given
-   with `--bridge`) to `/data/local/tmp/eyepiece/` and runs it with `-1 -b`, or uses the one
-   installed on the goggles. It exits with the PC session. A bridge started from the menu is
-   replaced. See the [CLI guide](../usage.md).
-2. **From the goggles' menu.** The mod adds **More → Eyepiece**, which runs
-   `/vendor/natartos/apps/eyepiece/eyepiece_bridge -b`. Then, on the PC, run
-   `adb forward tcp:42420 tcp:42420` and start `eyepiece-pc --no-deploy`. A PC disconnect
-   does not end a menu-launched session; another client can connect.
-   **Back** (short click) exits the bridge and returns to the goggles UI. **Long-hold Back**
-   (≥ 1.5 s, the overlay's app exit) also stops it.
-3. **By hand** from `adb shell`: `/vendor/natartos/apps/eyepiece/eyepiece_bridge` (add `-b`
-   for the Back exit).
+The log is `/data/vendor/tinkerglass/run/pcdisplay/bridge.log`.
 
-The log is `/data/local/tmp/eyepiece.log`.
+## tinkerglass differences
 
-A menu-launched bridge cannot host a GFX1 pane (it needs `-1` or `-R`), and eyepiece-pc
-always asks for one, so use the PC-started bridge for normal operation.
+- **Capabilities.** The bridge advertises `STEREO`, `PANE_BGRA`, `PANE_OPAQUE_BGRA`, `PANE_ALPHA` and `RECONFIG`.
+  It does not advertise `GUI_ALPHA`, `GUI_ALPHA_ACTIVE` or `PANE_RECONNECT`: while a `Configure` is active it hides
+  the DJI GUI completely (through tinkerglass's display service), and a disconnect releases everything. The PC
+  treats the missing capabilities as unavailable: `--gui-opacity` is ignored with a notice, the stream still starts.
+- **Panes and the full-panel stream** both work in the same bridge process, without `-R`.
+- **Transport.** The USB video interface needs no bridge option (`-B` is gone); see
+  [transports](../transports.md). There is no USB network (RNDIS) mode.
+- **No overlay mod, no backdrop hook.** The GUI backdrop handshake and the `eyepiece.*` files below belong to the
+  natartos-era bridge.
 
 ## Display modes
 
@@ -139,6 +145,9 @@ with the hook installed has not been tested.
 
 ## Bridge options
 
+*tinkerglass:* the PC Display bridge takes `-p -A -V -H -b -1 -N -F -S -L -O -M -Q -l -Z -h`; `-B`, `-R`, `-s` and `-c`
+below are natartos-era options it does not have (`-U` is accepted and ignored).
+
 ```text
 -p PORT      TCP port on 127.0.0.1 (default 42420)
 -A           listen on all interfaces instead of loopback
@@ -156,7 +165,7 @@ with the hook installed has not been tested.
 -O plane[:M] zero-copy scan-out on VOP mask M (1 = VOP0, 3 = both; default plane:1)
 -L R,F,V     hw: decoder start-config knobs (no_reorder default 1, +0x24, +0x2c)
 -N           null decoder (protocol and latency plumbing test; nothing is displayed)
--l FILE      log file (default /data/local/tmp/eyepiece.log, '-' = none)
+-l FILE      log file (tinkerglass: eyepiece-pc passes /data/vendor/tinkerglass/run/pcdisplay/bridge.log)
 ```
 
 Direct VIDEO0 output is the default. GUI opacity and pane alpha are configured through the
@@ -168,7 +177,7 @@ protocol, not through options. GFX1 panes use BGRA output and manage `dji_arhome
   (bus command `0x15/0x31` to the MCU). It sends only two fixed payloads, start and stop, and
   stops the stream on every exit path: normal exit, the bridge dying (the helper process gets a
   parent-death signal) and the helper dying (the bridge runs a stopper). If the stream is ever
-  left running, run `/vendor/natartos/apps/eyepiece/eyepiece_bridge -Z`; it sends only the stop
+  left running, run `/vendor/tinkerglass/current/mods/pcdisplay/bin/pcdisplay_bridge -Z`; it sends only the stop
   and exits.
 - **Files.** At runtime the bridge writes only under `/data/local/tmp`: `eyepiece.log`, `eyepiece.backdrop`
   (the GUI backdrop handshake), `eyepiece.gui-alpha` (the GUI opacity request) and `eyepiece.bulk-state` (the
@@ -207,6 +216,10 @@ Ownership rules to keep when changing decoder, display or reconnect code:
 
 ## USB bulk transport
 
+*tinkerglass:* the video interface is part of tinkerglass's USB mode (interface `ff/54/03`, owned by its USB service),
+not something the bridge creates; there is no `-B`, no recovery snapshot and no gadget switch by the bridge. The
+description below is the natartos-era `-B` mode.
+
 `-B` adds a separately named `ffs.eyepiece` FunctionFS vendor interface without reusing DJI's bulk services.
 TCP listeners stay available. This is **experimental**: do not treat it as ready for normal use.
 
@@ -225,40 +238,12 @@ The host side is described in [transports](../transports.md).
 
 ## Build and deploy
 
-The bridge is an Android (bionic) binary built with the NDK (r25 or newer, API 28; CI uses r30).
-It also needs `protoc`, the nanopb 0.4.9.1 generator and its matching runtime source
-(`NANOPB_DIR`), and the schema: set `EYEPIECE_PROTO` to the absolute path of this repository's
-`contract/eyepiece-rpc.proto`. The natartos Nix development shell provides the tools; on Apple
-Silicon, its x86-64 host tools run under Rosetta.
-
-```sh
-cd natartos
-mods/eyepiece/bridge/build.sh [OUTDIR]       # NDK: $ANDROID_NDK_HOME or newest ~/Android/Sdk/ndk/*
-mods/eyepiece/bridge/build.sh host [OUTDIR]  # x86-64 Linux build for protocol tests on the PC
-```
-
-`scripts/build.sh` builds it into `dist/apps/eyepiece/eyepiece_bridge` when an NDK is found and skips
-it otherwise. CI ships it as a release asset. Set the repository variables `EYEPIECE_SCHEMA_REPOSITORY`
-and `EYEPIECE_SCHEMA_REF` to the repository and revision holding the matching schema (defaults
-`zuim/eyepiece-pc`, `main`). For Nix packaging:
-`EYEPIECE_PROTO=/absolute/path/eyepiece-rpc.proto nix build --impure`; the schema is copied into the
-derivation input.
-
-**Installing into `/vendor`** replaces the menu-launched bridge. Normally `eyepiece-pc` pushes its own
-copy and nothing in `/vendor` is needed. To install:
-
-```sh
-adb shell 'pidof eyepiece_bridge || echo not-running'          # must not be running
-adb pull /vendor/natartos/apps/eyepiece/eyepiece_bridge eyepiece_bridge.previous   # keep a backup
-adb push out/eyepiece_bridge /data/local/tmp/eyepiece_bridge.new
-adb shell 'mount -o remount,rw /vendor &&
-  cp /data/local/tmp/eyepiece_bridge.new /vendor/natartos/apps/eyepiece/eyepiece_bridge.tmp &&
-  chmod 755 /vendor/natartos/apps/eyepiece/eyepiece_bridge.tmp &&
-  mv /vendor/natartos/apps/eyepiece/eyepiece_bridge.tmp /vendor/natartos/apps/eyepiece/eyepiece_bridge &&
-  sync; mount -o remount,ro /vendor'
-```
-
-Compare `sha256sum` on the device with the file you built. To roll back, push the backup the same way.
+tinkerglass builds and installs the bridge with its PC Display mod (`mods/pcdisplay/bridge/` in the tinkerglass
+repository; see its documentation for the toolchain and the install). The bridge needs the schema of this
+repository, `contract/eyepiece-rpc.proto`, at build time. `build.sh host` there builds an x86-64
+`pcdisplay_bridge_host` for protocol tests on the PC (see
+[building](../development/building.md#bridge-interoperability-tests)). eyepiece-pc never pushes a bridge to the
+goggles and never writes to `/vendor`.
 
 ## Known limits
 

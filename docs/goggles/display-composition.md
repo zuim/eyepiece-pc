@@ -4,6 +4,9 @@ How the DJI Goggles 3 compose their display and how Eyepiece puts PC video on it
 **firmware 01.00.1600** and is not assumed to hold on other firmware. For the bridge that implements it see
 [the goggles bridge](bridge.md); the raw device inventory is in [the device dump](device-dump.md).
 
+The GUI backdrop section below describes the natartos-era hook. tinkerglass's PC Display hides the DJI GUI
+completely while a stream is configured instead (through tinkerglass's display service), so none of it applies there.
+
 - [Goals](#goals)
 - [Display stack](#display-stack)
 - [Pixel formats](#pixel-formats)
@@ -59,7 +62,7 @@ count 1 at `0xb0`, dimensions at `0x38` and `0x3c`, and the format at `0x28`; th
 bytes. A successful `push_frame` return does not by itself prove the plane shows alpha.
 
 Decoder output (NV12) carries no per-pixel alpha, so alpha panes are converted to ARGB. The exact ARGB channel
-order and alpha math have not been verified quantitatively. `mods/eyepiece/bridge/gfx1_alpha_test.c` in natartos is
+order and alpha math have not been verified quantitatively. `mods/pcdisplay/bridge/gfx1_alpha_test.c` in tinkerglass is
 a standalone probe that submits an ARGB pattern to GFX1 (`bridge/build.sh alpha-test`).
 
 ## How the stock apps render

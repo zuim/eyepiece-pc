@@ -16,21 +16,18 @@ eyepiece-pc --no-video --print-pose                 # head tracking only
 eyepiece-pc --source pipewire --restore-token ~/.config/eyepiece.token   # Wayland portal, no root
 eyepiece-pc --source test --preview                 # test pattern + local ffplay preview
 eyepiece-pc --source file --input clip.mkv
-eyepiece-pc --transport usb-bulk                    # use the dedicated USB bulk link
+eyepiece-pc --transport usb-bulk                    # only the tinkerglass USB video interface
 eyepiece-pc --no-deploy                             # use a bridge that is already running
 ```
 
-By default eyepiece-pc starts the bridge itself, so there is no need to open Eyepiece in the goggles'
-menu first (a bridge started there is replaced). A local `eyepiece_bridge` next to the executable, in
-`$XDG_DATA_HOME/eyepiece/` or given with `--bridge` is pushed to `/data/local/tmp/eyepiece/`;
-otherwise the one installed on the goggles is used. It runs with `-1 -b` (plus `-R` with `--reconnect`
-and a pane, and any `--bridge-args`), exits with the PC session, and logs to
-`/data/local/tmp/eyepiece.log` on the goggles.
+By default eyepiece-pc starts the bridge itself, so there is no need to open PC Display in the goggles'
+menu first (a bridge started there hands over by itself). It asks tinkerglass's menu service to launch the
+installed PC Display bridge (`/vendor/tinkerglass/current/mods/pcdisplay/bin/pcdisplay_bridge`) with `-1 -l <log>`
+plus any `--bridge-args`; nothing is pushed to the goggles. The bridge exits with the PC session and logs to
+`/data/vendor/tinkerglass/run/pcdisplay/bridge.log`. Without the mod, or with the tinkerglass mods not
+running, eyepiece-pc stops with a message saying so.
 
-`--no-deploy` uses a bridge that is already running. eyepiece-pc always asks for a GFX1 pane (the whole
-panel by default), which needs a bridge started with `-1` or `-R`
-(see [the bridge options](goggles/bridge.md#bridge-options)); a bridge started from the goggles' menu
-rejects it.
+`--no-deploy` uses a bridge that is already running (for example started from More > PC Display).
 
 ## Resolution, input and statistics
 

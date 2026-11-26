@@ -57,11 +57,11 @@ The suite does not touch a device or capture the screen. Tests that need hardwar
 
 ### Bridge interoperability tests
 
-The nanopb/prost interop tests require the sibling natartos checkout, nanopb 0.4.9.1
+The nanopb/prost interop tests require a checkout of tinkerglass (the PC Display bridge), nanopb 0.4.9.1
 source in `NANOPB_DIR`, `protoc`, `protoc-gen-nanopb`, a C compiler and Cargo:
 
 ```sh
-bridge=../natartos/mods/eyepiece/bridge
+bridge=../tinkerglass/mods/pcdisplay/bridge
 out=target/bridge-interop
 mkdir -p "$out"
 PYTHONPATH="${NANOPB_PYTHONPATH:-}${PYTHONPATH:+:$PYTHONPATH}" \
@@ -72,9 +72,9 @@ cc -std=gnu11 -I "$out" -I "$NANOPB_DIR" "$bridge/tests/wire_interop.c" "$bridge
 EYEPIECE_WIRE_INTEROP="$out/wire_interop" cargo test -p eyepiece-link --test bridge_interop -- --ignored
 ```
 
-The bridge's own protocol tests (configuration sequence, invalid video, nanopb wire format) live in the natartos
-repository under `mods/eyepiece/bridge/tests/` and run in its CI; they build the host bridge
-(`build.sh host`) and drive it with `-N -H -1` as a null-decoder protocol bridge.
+The bridge's own protocol tests (configuration sequence, invalid video, nanopb wire format) live in the tinkerglass
+repository under `mods/pcdisplay/bridge/tests/`; they build the host bridge
+(`build.sh host`, `pcdisplay_bridge_host`) and drive it with `-N -H -1` as a null-decoder protocol bridge.
 
 ### Hardware tests
 
