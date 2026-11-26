@@ -7,9 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-libc = "0.2"
 nusb = "0.2.9"
 prost = "0.13"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 prost-build = "0.13"

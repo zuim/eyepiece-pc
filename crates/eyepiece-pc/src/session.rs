@@ -549,12 +549,11 @@ pub fn run(mut cfg: Config, ctl: Arc<Control>, ev: Events) -> Result<(), String>
                                     candidate_cfg.pane = Some(pane);
                                 }
                                 let size_changed = candidate_cfg.frame_size() != capture_cfg.frame_size();
-                                let mut reopen_source = source_changed || (size_changed && matches!(candidate_cfg.source, SourceKind::Test { .. }));
+                                let reopen_source = source_changed || (size_changed && matches!(candidate_cfg.source, SourceKind::Test { .. }));
                                 #[cfg(target_os = "macos")]
-                                {
-                                    reopen_source |= pane.is_some() && matches!(candidate_cfg.source, SourceKind::ScreenCaptureKit { .. })
-                                        && (size_changed || candidate_cfg.pane.map(|p| p.pane.format) != capture_cfg.pane.map(|p| p.pane.format));
-                                }
+                                let reopen_source = reopen_source
+                                    || (pane.is_some() && matches!(candidate_cfg.source, SourceKind::ScreenCaptureKit { .. })
+                                        && (size_changed || candidate_cfg.pane.map(|p| p.pane.format) != capture_cfg.pane.map(|p| p.pane.format)));
                                 let mut new_source = if reopen_source { Some(make_source(&candidate_cfg, family)?) } else { None };
                                 let mut new_convert_cfg = convert_cfg.clone();
                                 if let Some(pane) = pane {
