@@ -34,11 +34,11 @@ describe("panel model", () => {
   });
 
   it("keeps choice labels stable and hides unsupported current choices", () => {
-    const transport = setting({ name: "transport", type: "choice", choices: ["auto", "adb"] });
+    const codec = setting({ name: "codec", type: "choice", choices: ["h264"] });
 
-    expect(choiceLabel("transport", "adb")).toBe("Android Debug Bridge (ADB)");
-    expect(selectedChoice(transport, { transport: "adb" })).toBe("adb");
-    expect(selectedChoice(transport, { transport: "usb-bulk" })).toBe("");
+    expect(choiceLabel("codec", "hevc")).toBe("H.265 (HEVC)");
+    expect(selectedChoice(codec, { codec: "h264" })).toBe("h264");
+    expect(selectedChoice(codec, { codec: "hevc" })).toBe("");
   });
 
   it("offers sliders only for bounded numeric settings with useful step sizes", () => {
