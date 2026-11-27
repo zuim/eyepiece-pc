@@ -1,4 +1,4 @@
-//! eyepiece-pc command line: the options, and how they become a [`Config`] (adb deploy/forward
+//! eyepiece-pc command line: the options, and how they become a [`Config`] (the USB connection
 //! included). The `eyepiece-pc` binary is [`main`]; other frontends (the GUI) build an [`Args`]
 //! and use [`prepare`] + [`run_prepared`], so every frontend takes the same code path.
 
@@ -6,7 +6,6 @@ use crate::session::{self, Config, Control, Events, PaneConfig, SourceKind};
 use clap::{parser::ValueSource, ArgMatches, CommandFactory, FromArgMatches, Parser};
 use eyepiece_av::{Codec, EncoderConfig, PackedAlpha};
 use eyepiece_capture::SyncMode;
-use eyepiece_link::adb::Adb;
 use eyepiece_link::{LinkOptions, LinkTransport, LogFn};
 use eyepiece_link::proto::{Info, Pane, PaneFormat, EP_INFO_PANE_BGRA};
 use std::io::BufRead;
@@ -25,35 +24,26 @@ use std::time::Duration;
     after_help = "Keys (stdin): r + Enter = recenter, i + Enter = force IDR, q + Enter = quit.\n\
 Examples:\n  eyepiece-pc                                 # start the bridge on the goggles, KMS capture of the first screen\n  \
 eyepiece-pc --output eDP-1 --encoder nvenc --bitrate 30M\n  \
-eyepiece-pc --no-deploy                     # use the bridge started from the goggles' menu\n  \
-eyepiece-pc --source test --host 127.0.0.1 --no-forward   # against pcdisplay_bridge_host -N\n  \
+eyepiece-pc --no-launch                     # use the bridge started from the goggles' menu\n  \
+eyepiece-pc --source test --host 127.0.0.1:42420   # against pcdisplay_bridge_host -N -p 42420\n  \
 eyepiece-pc --list                          # outputs / planes"
 )]
 pub struct Args {
-    // ---- transport ----
-    /// adb executable
-    #[arg(long, default_value = "adb")]
-    pub adb: String,
-    /// adb device serial
+    // ---- connection (USB: the goggles in tinkerglass USB mode) ----
+    /// USB serial number of the goggles (only needed with more than one connected)
     #[arg(long)]
     pub serial: Option<String>,
-    /// TCP port (bridge listens on 127.0.0.1:PORT on the goggles)
-    #[arg(long, default_value_t = 42420)]
-    pub port: u16,
-    /// host to connect to (127.0.0.1 via adb forward, or a directly reachable bridge)
-    #[arg(long, default_value = "127.0.0.1")]
-    pub host: String,
-    /// data link: auto (USB bulk, then adb) | usb-bulk (strict) | adb (adb forward only)
-    #[arg(long, default_value = "auto")]
-    pub transport: String,
-    /// don't run `adb forward` (directly reachable bridge or forwarding set up elsewhere)
-    #[arg(long)]
-    pub no_forward: bool,
+    /// connect over TCP to HOST:PORT instead of USB, to a bridge started with -p (the host-built
+    /// bridge of the interop tests; never the goggles in normal use). Starts no bridge
+    #[arg(long, value_name = "HOST:PORT")]
+    pub host: Option<String>,
     /// don't start a bridge for this session: use the one already running on the goggles
-    /// (started from their menu). Default: start tinkerglass's bridge (PC Display); it
-    /// replaces a bridge started from the menu and exits with this session
-    #[arg(long)]
-    pub no_deploy: bool,
+    /// (started from their menu). Default: start tinkerglass's bridge (PC Display) through the
+    /// goggles' control interface; it replaces a bridge started from the menu and exits with
+    /// this session
+    #[arg(long, alias = "no-deploy")]
+    #[serde(alias = "no_deploy")]
+    pub no_launch: bool,
     /// (the default; kept for scripts)
     #[arg(long, hide = true)]
     pub deploy: bool,
@@ -513,48 +503,28 @@ fn limit_privileges(a: &Args) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_transport(mode: &str) -> Result<(), String> {
-    match mode {
-        "auto" | "usb-bulk" | "adb" => Ok(()),
-        _ => Err(format!(
-            "--transport {mode}: expected auto | usb-bulk | adb"
-        )),
-    }
+/// The bridge's arguments for a PC session: `-1` (exit with this session: a bridge left
+/// running keeps the goggles black), then `--bridge-args`.
+pub fn launch_args(bridge_args: &str) -> Vec<String> {
+    std::iter::once("-1".to_string()).chain(bridge_args.split_whitespace().map(String::from)).collect()
 }
 
-/// Select USB before opening any bridge session; `addr` remains the TCP fallback for auto.
-fn pick_connection(a: &Args, log: &dyn Fn(String)) -> Result<(String, LinkTransport), String> {
-    let mode = a.transport.as_str();
-    validate_transport(mode)?;
-    if mode == "adb" || (mode != "usb-bulk" && a.host != "127.0.0.1") {
-        return Ok((a.host.clone(), LinkTransport::Tcp));
+/// USB unless `--host` names a TCP bridge (tests). USB starts the bridge through the control
+/// interface first, unless `--no-launch`.
+fn pick_connection(a: &Args) -> Result<(String, LinkTransport), String> {
+    if let Some(host) = &a.host {
+        if host.rsplit_once(':').is_none_or(|(h, p)| h.is_empty() || p.parse::<u16>().is_err()) {
+            return Err(format!("--host {host}: expected HOST:PORT"));
+        }
+        return Ok((host.clone(), LinkTransport::Tcp));
     }
-    match mode {
-        "usb-bulk" => Ok((
-            a.host.clone(),
-            LinkTransport::UsbBulk {
-                serial: a.serial.clone(),
-            },
-        )),
-        "auto" => match eyepiece_link::usb::probe(a.serial.as_deref()) {
-            Ok(()) => {
-                log("transport selection: USB bulk preferred; ADB kept as fallback".into());
-                Ok((
-                    a.host.clone(),
-                    LinkTransport::Auto {
-                        serial: a.serial.clone(),
-                    },
-                ))
-            }
-            Err(reason) => {
-                log(format!(
-                    "NOTICE: USB bulk unavailable ({reason}); using ADB."
-                ));
-                Ok((a.host.clone(), LinkTransport::Tcp))
-            }
+    Ok((
+        String::new(),
+        LinkTransport::UsbBulk {
+            serial: a.serial.clone(),
+            launch: (!a.no_launch).then(|| launch_args(&a.bridge_args)),
         },
-        _ => unreachable!(),
-    }
+    ))
 }
 
 fn explicit_options(matches: &ArgMatches) -> std::collections::HashSet<String> {
@@ -576,15 +546,13 @@ impl Default for Args {
     }
 }
 
-/// A session ready to run: adb deploy/forward done, options turned into a [`Config`].
+/// A session ready to run: options turned into a [`Config`]. The bridge is started when the
+/// session connects (and again on every reconnect).
 pub struct Prepared {
     pub cfg: Config,
-    /// the bridge was pushed + started by us (it exits with the session)
-    pub deployed: bool,
-    adb: Adb,
 }
 
-/// Everything before streaming: privileges, --list, option parsing, adb deploy/forward.
+/// Everything before streaming: privileges, --list, option parsing.
 /// `Ok(None)`: nothing to stream (`--list` printed its output).
 pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
     #[cfg(target_os = "linux")]
@@ -633,29 +601,17 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
         vaapi_device: a.vaapi_device.clone(),
     };
 
-    let adb = Adb::new(a.adb.clone(), a.serial.clone());
-    if !a.no_connect {
-        validate_transport(&a.transport)?;
-        if !a.no_deploy {
-            adb.deploy(&a.bridge_args, &**log)?;
-        } else if !a.no_forward && !adb.bridge_running() {
-            log(
-                "no bridge running on the goggles: start More → PC Display on the goggles, or leave out \
-                 --no-deploy (then eyepiece-pc starts it)"
-                    .into(),
-            );
-        }
-        if !a.no_forward {
-            adb.forward(a.port, a.port)?;
-        }
-    }
-    let (host, transport) = if a.no_connect {
-        (a.host.clone(), LinkTransport::Tcp)
+    let link = if a.no_connect {
+        None
     } else {
-        pick_connection(a, &**log)?
+        let (addr, transport) = pick_connection(a)?;
+        if a.no_launch && a.host.is_none() {
+            log("using the bridge that runs on the goggles (More → PC Display there)".into());
+        }
+        Some((addr, transport))
     };
-    let link = (!a.no_connect).then(|| LinkOptions {
-        addr: format!("{}:{}", host, a.port),
+    let link = link.map(|(addr, transport)| LinkOptions {
+        addr,
         transport,
         connect_timeout: Duration::from_secs(15),
         opentrack: (!a.opentrack.is_empty()).then(|| a.opentrack.clone()),
@@ -678,7 +634,7 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
         video: !a.no_video,
         link,
         reconnect: a.reconnect,
-        stop_bridge: a.stop_bridge || (a.reconnect && !a.no_deploy && !a.no_connect),
+        stop_bridge: a.stop_bridge || (a.reconnect && !a.no_launch && !a.no_connect),
         dump: a.dump.clone(),
         preview,
         stats_interval: a.stats_interval,
@@ -690,28 +646,13 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
         gui_opacity: a.gui_opacity,
         pane_opacity: a.pane_opacity,
     };
-    Ok(Some(Prepared {
-        cfg,
-        deployed: !a.no_deploy && !a.no_connect,
-        adb,
-    }))
+    Ok(Some(Prepared { cfg }))
 }
 
-/// Run the session (blocks until it ends), then the post-session safety step of `--deploy`.
+/// Run the session (blocks until it ends). The bridge started for it exits with it, and
+/// tinkerglass' hub stops the head-tracking stream when the bridge leaves.
 pub fn run_prepared(p: Prepared, ctl: Arc<Control>, ev: Events) -> Result<(), String> {
-    let log = ev.log.clone();
-    let persistent_bridge = p.deployed && p.cfg.reconnect;
-    let res = session::run(p.cfg, ctl, ev);
-    if p.deployed {
-        std::thread::sleep(std::time::Duration::from_secs(3));
-        if persistent_bridge && p.adb.bridge_running() {
-            log("WARNING: a bridge is still running; stop the reconnect bridge on the goggles if the session ended disconnected".into());
-        }
-        if let Some(l) = p.adb.mcu_stop_safety() {
-            log(l);
-        }
-    }
-    res
+    session::run(p.cfg, ctl, ev)
 }
 
 fn real_main(a: Args, log: LogFn) -> Result<(), String> {
@@ -790,12 +731,29 @@ mod tests {
     }
 
     #[test]
-    fn usb_transport_options_reject_removed_network_mode() {
-        let args = Args::try_parse_from(["eyepiece-pc", "--transport", "usb-bulk"]).unwrap();
-        assert_eq!(args.transport, "usb-bulk");
-        validate_transport(&args.transport).unwrap();
-        assert!(validate_transport("usb-net").is_err());
-        assert!(validate_transport("bad").is_err());
+    fn usb_is_the_only_normal_connection_and_launches_the_bridge() {
+        let (_, t) = pick_connection(&Args::default()).unwrap();
+        assert!(matches!(t, LinkTransport::UsbBulk { serial: None, launch: Some(ref a) } if a == &["-1"]));
+        let args = Args::try_parse_from(["eyepiece-pc", "--serial", "S", "--bridge-args=-H -F 4"]).unwrap();
+        let (_, t) = pick_connection(&args).unwrap();
+        assert!(matches!(t, LinkTransport::UsbBulk { serial: Some(ref s), launch: Some(ref a) }
+            if s == "S" && a == &["-1", "-H", "-F", "4"]));
+        // --no-launch (and the old name) uses the running bridge
+        for flag in ["--no-launch", "--no-deploy"] {
+            let (_, t) = pick_connection(&Args::try_parse_from(["eyepiece-pc", flag]).unwrap()).unwrap();
+            assert!(matches!(t, LinkTransport::UsbBulk { launch: None, .. }));
+        }
+        // TCP only for a test bridge, by HOST:PORT
+        let (addr, t) = pick_connection(&Args::try_parse_from(["eyepiece-pc", "--host", "127.0.0.1:4242"]).unwrap()).unwrap();
+        assert!(matches!(t, LinkTransport::Tcp));
+        assert_eq!(addr, "127.0.0.1:4242");
+        for bad in ["127.0.0.1", ":1", "h:x"] {
+            assert!(pick_connection(&Args { host: Some(bad.into()), ..Args::default() }).is_err(), "{bad}");
+        }
+        // the ADB options are gone
+        for removed in ["--adb=adb", "--transport=adb", "--no-forward", "--port=42420"] {
+            assert!(Args::try_parse_from(["eyepiece-pc", removed]).is_err(), "{removed}");
+        }
     }
 
     #[test]

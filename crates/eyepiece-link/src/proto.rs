@@ -6,7 +6,6 @@ pub mod wire {
 use prost::Message;
 use std::io;
 
-pub const EP_PORT: u16 = 42420;
 pub const EP_VERSION: u32 = 4;
 pub const EP_MAX_PAYLOAD: u32 = 4 << 20;
 

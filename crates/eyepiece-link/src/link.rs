@@ -17,16 +17,23 @@ use std::time::{Duration, Instant};
 
 pub type LogFn = Arc<dyn Fn(String) + Send + Sync>;
 
+/// How to reach the bridge. Normal use is USB: the bridge is started through the control link
+/// (control 1) and then reached on the video interface. TCP only reaches a bridge started with
+/// `-p` (the host-built bridge of the interop tests).
 #[derive(Clone)]
 pub enum LinkTransport {
     Tcp,
-    UsbBulk { serial: Option<String> },
-    Auto { serial: Option<String> },
+    UsbBulk {
+        serial: Option<String>,
+        /// start the bridge first through the control link with these arguments (`-1`, ...);
+        /// None: use a bridge that already runs (started from the goggles' menu)
+        launch: Option<Vec<String>>,
+    },
 }
 
 #[derive(Clone)]
 pub struct LinkOptions {
-    /// host:port of the bridge (adb forward: 127.0.0.1:42420)
+    /// host:port of a bridge started with `-p` (TCP transport only)
     pub addr: String,
     pub transport: LinkTransport,
     pub connect_timeout: Duration,
@@ -158,7 +165,7 @@ fn usb_io_error(error: std::io::Error) -> std::io::Error {
     {
         return std::io::Error::new(
             std::io::ErrorKind::ConnectionAborted,
-            "USB device not responding (IOKit 0xe00002ed); check USB connection or try --transport adb",
+            "USB device not responding (IOKit 0xe00002ed); check the USB cable and hub",
         );
     }
     error
@@ -183,9 +190,7 @@ fn open_tcp(addr: &str, timeout: Duration) -> Result<(Writer, Reader, TcpStream)
             Err(e) => {
                 if Instant::now() >= t_end {
                     return Err(format!(
-                        "cannot connect to the bridge on {addr} ({e}); is it running and is \
-                         `adb forward tcp:{p} tcp:{p}` set?",
-                        p = EP_PORT
+                        "cannot connect to the bridge on {addr} ({e}); is a bridge with -p listening there?"
                     ));
                 }
                 std::thread::sleep(Duration::from_millis(300));
@@ -226,29 +231,25 @@ fn open_usb(serial: Option<&str>) -> Result<(Writer, Reader, (Device, Interface)
     ))
 }
 
+/// USB: claim the video interface, then start the bridge through the control link (when asked
+/// to). Claiming first means a second eyepiece-pc stops at "in use" instead of replacing the
+/// bridge of the first one's session. No fallback to anything else.
 fn select_initial<T>(
     requested: &LinkTransport,
     open_tcp: impl FnOnce() -> Result<T, String>,
+    launch: impl FnOnce(Option<&str>, &[String]) -> Result<(), String>,
     open_usb: impl FnOnce(Option<&str>) -> Result<T, String>,
-    log: &LogFn,
 ) -> Result<(T, LinkTransport), String> {
     match requested {
         LinkTransport::Tcp => open_tcp().map(|opened| (opened, LinkTransport::Tcp)),
-        LinkTransport::UsbBulk { serial } => open_usb(serial.as_deref())
-            .map(|opened| (opened, LinkTransport::UsbBulk { serial: serial.clone() }))
-            .map_err(|error| format!("cannot connect via USB bulk: {error}")),
-        LinkTransport::Auto { serial } => match open_usb(serial.as_deref()) {
-            Ok(opened) => Ok((
-                opened,
-                LinkTransport::UsbBulk {
-                    serial: serial.clone(),
-                },
-            )),
-            Err(reason) => {
-                log(format!("NOTICE: USB bulk unavailable ({reason}); using TCP."));
-                open_tcp().map(|opened| (opened, LinkTransport::Tcp))
+        LinkTransport::UsbBulk { serial, launch: args } => {
+            let opened = open_usb(serial.as_deref())
+                .map_err(|error| format!("cannot connect to the bridge over USB: {error}"))?;
+            if let Some(args) = args {
+                launch(serial.as_deref(), args)?;
             }
-        },
+            Ok((opened, requested.clone()))
+        }
     }
 }
 
@@ -267,11 +268,11 @@ impl Link {
                     format!("TCP {}", o.addr),
                 ))
             },
+            |serial, args| crate::control::launch_bridge(serial, args, &*log).map(|_| ()),
             |serial| {
                 let (writer, reader, usb, name) = open_usb(serial)?;
                 Ok((writer, reader, None, Some(usb), name))
             },
-            &log,
         )?;
         let ot = match &o.opentrack {
             Some(a) if !a.is_empty() => {
@@ -513,7 +514,7 @@ impl Link {
         self.send(wire::envelope::Message::Control(wire::Control { operation: EP_OP_QUIT.into(), enabled: false }))
     }
 
-    /// Bytes written but not yet taken by the peer (adb server / bridge): Linux SIOCOUTQ.
+    /// Bytes written but not yet taken by the peer (the bridge): Linux SIOCOUTQ.
     pub fn unsent_bytes(&self) -> Option<usize> {
         #[cfg(target_os = "linux")]
         {
@@ -1111,7 +1112,7 @@ mod tests {
         let error = usb_io_error(TransferError::Unknown(0xe00002ed).into());
         assert_eq!(error.kind(), std::io::ErrorKind::ConnectionAborted);
         assert!(error.to_string().contains("USB device not responding"));
-        assert!(error.to_string().contains("--transport adb"));
+        assert!(error.to_string().contains("USB cable"));
 
         for error in [
             std::io::Error::from(std::io::ErrorKind::TimedOut),
@@ -1262,74 +1263,57 @@ mod tests {
     }
 
     #[test]
-    fn auto_falls_back_to_tcp_before_session_start() {
-        let requested = LinkTransport::Auto { serial: None };
-        let tcp_calls = AtomicU32::new(0);
-        let messages = Arc::new(Mutex::new(Vec::new()));
-        let captured = messages.clone();
-        let log: LogFn = Arc::new(move |message| captured.lock().unwrap().push(message));
-
+    fn usb_claims_the_video_interface_then_launches_the_bridge() {
+        let order = Mutex::new(Vec::new());
+        let requested = LinkTransport::UsbBulk { serial: Some("serial".into()), launch: Some(vec!["-1".into()]) };
         let (selected, actual) = select_initial(
             &requested,
-            || {
-                tcp_calls.fetch_add(1, Ordering::Relaxed);
-                Ok("tcp")
-            },
-            |_| Err("USB interface inaccessible".into()),
-            &log,
-        )
-        .unwrap();
-
-        assert_eq!(selected, "tcp");
-        assert!(matches!(actual, LinkTransport::Tcp));
-        assert_eq!(tcp_calls.load(Ordering::Relaxed), 1);
-        assert!(messages.lock().unwrap()[0].contains("USB interface inaccessible"));
-    }
-
-    #[test]
-    fn auto_prefers_bulk_without_opening_tcp() {
-        let requested = LinkTransport::Auto {
-            serial: Some("serial".into()),
-        };
-        let tcp_opened = AtomicBool::new(false);
-        let log: LogFn = Arc::new(|_| {});
-
-        let (selected, actual) = select_initial(
-            &requested,
-            || {
-                tcp_opened.store(true, Ordering::Relaxed);
-                Ok("tcp")
+            || -> Result<&str, String> { panic!("no TCP for USB") },
+            |serial, args| {
+                assert_eq!((serial, args), (Some("serial"), &["-1".to_string()][..]));
+                order.lock().unwrap().push("launch");
+                Ok(())
             },
             |serial| {
                 assert_eq!(serial, Some("serial"));
+                order.lock().unwrap().push("video");
                 Ok("bulk")
             },
-            &log,
         )
         .unwrap();
-
         assert_eq!(selected, "bulk");
-        assert!(matches!(actual, LinkTransport::UsbBulk { .. }));
-        assert!(!tcp_opened.load(Ordering::Relaxed));
+        assert!(matches!(actual, LinkTransport::UsbBulk { launch: Some(_), .. }), "reconnects launch again");
+        assert_eq!(*order.lock().unwrap(), ["video", "launch"]);
     }
 
     #[test]
-    fn explicit_bulk_does_not_fall_back_to_tcp() {
-        let requested = LinkTransport::UsbBulk { serial: None };
-        let tcp_opened = AtomicBool::new(false);
-        let log: LogFn = Arc::new(|_| {});
-
+    fn a_busy_video_interface_launches_nothing_and_nothing_falls_back() {
+        let requested = LinkTransport::UsbBulk { serial: None, launch: Some(vec![]) };
         let result = select_initial(
             &requested,
-            || {
-                tcp_opened.store(true, Ordering::Relaxed);
-                Ok("tcp")
-            },
-            |_| Err("no matching interface".into()),
-            &log,
+            || -> Result<&str, String> { panic!("no TCP fallback") },
+            |_, _| panic!("another session's bridge must not be replaced"),
+            |_| Err("the goggles' video interface is in use by another program".into()),
         );
+        assert!(matches!(result, Err(error) if error.contains("in use")));
+        let failed = select_initial(
+            &requested,
+            || -> Result<&str, String> { panic!("no TCP fallback") },
+            |_, _| Err("PC Display is not installed on the goggles".into()),
+            |_| Ok("bulk"),
+        );
+        assert!(matches!(failed, Err(error) if error.contains("not installed")));
+    }
 
-        assert!(matches!(result, Err(error) if error.contains("no matching interface")));
-        assert!(!tcp_opened.load(Ordering::Relaxed));
+    #[test]
+    fn without_launch_the_running_bridge_is_used() {
+        let requested = LinkTransport::UsbBulk { serial: None, launch: None };
+        let result = select_initial(
+            &requested,
+            || -> Result<&str, String> { panic!("no TCP") },
+            |_, _| panic!("no launch"),
+            |_| Err("goggles not found in tinkerglass USB mode".into()),
+        );
+        assert!(matches!(result, Err(error) if error.contains("over USB") && error.contains("not found")));
     }
 }
