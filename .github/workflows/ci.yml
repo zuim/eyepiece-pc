@@ -53,7 +53,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: web-ui
-          path: web-ui
+          path: web/build
       - name: Build
         run: cargo build --release --locked
       - name: Test
@@ -72,7 +72,7 @@ jobs:
           cp "$bin/eyepiece-pc" "dist/$name/"
           echo "eyepiece-pc $ver, features: $feat, built on debian:testing ($(dpkg-query -W -f='${Version}' libavcodec-dev))" > "dist/$name/BUILD-INFO.txt"
           cp README.md LICENSE "dist/$name/"
-          cp -r web-ui "dist/$name/web"
+          cp -r web/build "dist/$name/web"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
       - uses: actions/upload-artifact@v4
         with:
@@ -85,6 +85,7 @@ jobs:
   # libraries), so a minimal FFmpeg 9 is built from source and bundled. KMS capture does not work from an AppImage (no file
   # capabilities): that is what the tar.gz is for.
   appimage:
+    needs: web
     runs-on: ubuntu-24.04
     env:
       LINUXDEPLOY_VERSION: 1-alpha-20251107-1
@@ -113,6 +114,10 @@ jobs:
           curl -sSfL -o "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage" \
             "https://github.com/linuxdeploy/linuxdeploy/releases/download/$LINUXDEPLOY_VERSION/linuxdeploy-x86_64.AppImage"
           chmod +x "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage"
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-ui
+          path: web/build
       - name: Build AppImage
         shell: bash
         run: |
@@ -139,7 +144,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: web-ui
-          path: web-ui
+          path: web/build
       - name: Build
         run: cargo build --release --locked
       - name: Test
@@ -153,7 +158,7 @@ jobs:
           New-Item -ItemType Directory -Force $d | Out-Null
           Copy-Item target\release\eyepiece-pc.exe, README.md, LICENSE $d
           Copy-Item target\release\*.dll $d
-          Copy-Item -Recurse web-ui "$d\web"
+          Copy-Item -Recurse web/build "$d/web"
           $ff = Get-ChildItem -Directory target\ffmpeg | Select-Object -First 1
           Copy-Item "$($ff.FullName)\LICENSE.txt" "$d\FFMPEG-LICENSE.txt" -ErrorAction SilentlyContinue
           Compress-Archive -Path $d -DestinationPath "dist\$name.zip"
@@ -163,6 +168,7 @@ jobs:
           path: dist/*.zip
 
   macos:
+    needs: web
     runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "15.0"
@@ -184,6 +190,10 @@ jobs:
         run: cargo build --release --locked
       - name: Test without screen capture permission
         run: cargo test --release --locked
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-ui
+          path: web/build
       - name: Package app and DMG
         shell: bash
         run: |

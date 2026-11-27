@@ -83,16 +83,18 @@ fn origin(value: &str) -> Result<(String, String), String> {
     Ok((format!("http://{authority}"), authority))
 }
 
-/// The static web app: EYEPIECE_WEB_DIR if set; otherwise `web/` next to the executable (release
-/// packages), then `web/build` of the checkout this binary was built from (development builds).
+/// The static web app: EYEPIECE_WEB_DIR if set; otherwise `web/` next to the executable (zip,
+/// tar.gz and AppImage packages) or in the bundle's
+/// `Contents/Resources` (macOS), then `web/build` of the checkout this binary was built from
+/// (development builds).
 fn web_dir() -> Result<PathBuf, String> {
     if let Some(dir) = std::env::var_os("EYEPIECE_WEB_DIR").map(PathBuf::from) {
         return if dir.is_dir() { Ok(dir) } else { Err(format!("EYEPIECE_WEB_DIR {} does not exist", dir.display())) };
     }
-    let packaged = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("web")));
+    let exe_dir = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let packaged = exe_dir.iter().flat_map(|dir| [dir.join("web"), dir.join("../Resources/web")]);
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/build");
     packaged
-        .into_iter()
         .chain([checkout.clone()])
         .find(|dir| dir.join("index.html").is_file())
         .ok_or_else(|| {

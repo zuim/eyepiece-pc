@@ -23,6 +23,13 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 cd "$ROOT"
 TARGET="${CARGO_TARGET_DIR:-$ROOT/target}"
 
+# the built web UI (cd web && pnpm build), served by every start
+WEB="${WEB_DIR:-$ROOT/web/build}"
+if [ ! -f "$WEB/index.html" ]; then
+    echo "The web UI is not built: run pnpm build in web/ (or set WEB_DIR)" >&2
+    exit 1
+fi
+
 cargo build --release --locked -p eyepiece-pc "$@"
 
 OUT="$TARGET/appimage"
@@ -33,6 +40,7 @@ strip -o "$APPDIR/usr/bin/eyepiece-pc" "$TARGET/release/eyepiece-pc"
 cp "$HERE/eyepiece-pc.desktop" "$APPDIR/usr/share/applications/"
 cp "$HERE/eyepiece-pc.svg" "$APPDIR/usr/share/icons/hicolor/scalable/apps/"
 cp README.md LICENSE "$APPDIR/"
+cp -R "$WEB" "$APPDIR/usr/bin/web"
 
 cat > "$OUT/AppRun" <<'EOF'
 #!/bin/sh
