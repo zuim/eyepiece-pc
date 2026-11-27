@@ -1,7 +1,24 @@
 # Command-line usage
 
-`eyepiece-pc` is a command-line program; `eyepiece-pc --web` adds the [web UI](web-ui.md) on top of the
-same engine. Run `eyepiece-pc --help` for every option.
+`eyepiece-pc` is a command-line program with the [web UI](web-ui.md) running alongside on the same engine.
+Run `eyepiece-pc --help` for every option.
+
+## Web UI, command-line mode and tray
+
+- `eyepiece-pc` streams at once and serves the web UI at http://127.0.0.1:4174/; `--open-web` (`--open`)
+  also opens it in the browser. The terminal shows log lines and stream state; statistics are in the web UI.
+  Options given on the command line are saved as web UI settings, so the next start uses them.
+- `--no-web` is the plain command-line mode: only the given options, nothing saved, the statistics line on
+  stderr, exit when the stream ends. One-run options (`--list`, `--no-connect`, `--dump`, `--frames`,
+  `--duration`, `--preview`, `--print-pose`) select it by themselves, so a benchmark never changes the saved
+  settings; `--web` keeps the web UI with them.
+- On Windows, a start without a terminal of its own (double-click, shortcut) hides the console window, opens
+  the web UI and shows a notification-area icon: click opens the web UI, the menu starts or stops the stream
+  and quits. It does not start a stream by itself, but resumes one that was running when it was last closed.
+  A second double-click opens the running instance. `--tray` shows the icon from a terminal too.
+- Settings live in `%APPDATA%\eyepiece\config\eyepiece-rpc.json` on Windows, `~/.config/eyepiece/` on Linux
+  (`$XDG_CONFIG_HOME`) and `~/Library/Application Support/eyepiece/` on macOS; `EYEPIECE_CONFIG_DIR`
+  points elsewhere (portable installs, tests). The path is printed at start.
 
 ## Basic use
 
@@ -35,9 +52,9 @@ By default the stream is 1920x1080, the goggles' panel size: they have no displa
 Every source is scaled to fit on the PC and letterboxed with black bars (`--no-letterbox`
 stretches instead). A [picture-in-picture pane](pip-and-transparency.md) is encoded at its own size.
 
-Stdin: `r` recenter, `i` force an IDR, `q` quit (each + Enter). Ctrl-C quits cleanly
+Stdin (both modes): `r` recenter, `i` force an IDR, `q` quit (each + Enter). Ctrl-C quits cleanly
 (twice: hard). `--dump out.h264` also writes the exact Annex-B stream; `--no-connect
---duration 10` encodes without a bridge. See `eyepiece-pc --help` for all
+--duration 10` encodes without a bridge (command-line mode). See `eyepiece-pc --help` for all
 options (`--fps` default 100 = goggles panel, `--bitrate` default 20M, `--sync
 vblank|poll|timer`, `--reconnect`, `--host` for a directly reachable bridge, …).
 

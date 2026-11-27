@@ -27,7 +27,8 @@ web UI's RPC.
 - Head tracking into games through opentrack (Windows, and Linux through Wine/Proton).
 - USB through tinkerglass's own video interface (WinUSB on Windows, no driver step), or `adb forward` as the
   fallback.
-- A browser UI (`eyepiece-pc --web`) with live settings, statistics, head-pose view and stream preview.
+- A local browser UI (always running alongside, `--open-web` opens it) with live settings, statistics, head-pose
+  view and stream preview; on Windows a double-click start puts eyepiece-pc in the notification area.
 - Many settings change live without restarting the stream, and a stream that was running resumes when the
   web UI server restarts; `--reconnect` rides out a link drop.
 
@@ -40,10 +41,19 @@ web UI's RPC.
 ```sh
 eyepiece-pc                       # capture the first screen, best encoder
 eyepiece-pc --head-tracking       # stream and head tracking to opentrack
-eyepiece-pc --web                 # the browser UI at http://127.0.0.1:4174/
+eyepiece-pc --open-web            # and open the web UI (http://127.0.0.1:4174/)
+eyepiece-pc --no-web              # plain command line: no web UI, nothing saved
 ```
 
 `eyepiece-pc` starts the bridge on the goggles by itself. Everything is experimental: **never use it while flying.**
+
+On Windows, double-clicking `eyepiece-pc.exe` opens the web UI in the browser and leaves an icon in the
+notification area (click: open the web UI; right-click: start or stop the stream, quit).
+
+## Known issues
+
+- **No mouse cursor in the stream on Windows 11 26H2.** With DXGI capture the cursor is missing from the
+  picture on Windows 11 26H2; on 25H2 it is shown. There is no workaround in eyepiece-pc yet.
 
 ## Documentation
 
