@@ -484,3 +484,14 @@ test("reset asks first, then restores the defaults with undo", async ({ page }) 
   await page.getByRole("button", { name: "Reset to Defaults" }).click();
   await expect(dialog).toBeVisible();
 });
+
+test("quit asks first, then stops eyepiece-pc", async ({ page }) => {
+  await page.getByRole("button", { name: "Quit", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Quit eyepiece-pc?" });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await page.evaluate(() => window.mockWorker.quits)).toBe(0);
+  await page.getByRole("button", { name: "Quit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Quit" }).click();
+  await expect(page.getByText("eyepiece-pc has quit.")).toBeVisible();
+  expect(await page.evaluate(() => window.mockWorker.quits)).toBe(1);
+});

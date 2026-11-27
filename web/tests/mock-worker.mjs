@@ -15,6 +15,7 @@ export function installMockWorker(schema) {
     propertyUpdates,
     previewUpdates,
     fileDialogs,
+    quits: 0,
     failNextSetting() {
       failNextSetting = true;
     },
@@ -49,6 +50,10 @@ export function installMockWorker(schema) {
 
   const fetchOriginal = window.fetch;
   window.fetch = (input, init) => {
+    if (typeof input === "string" && input === "/api/quit") {
+      window.mockWorker.quits += 1;
+      return Promise.resolve(new Response(JSON.stringify({ quitting: true }), { headers: { "Content-Type": "application/json" } }));
+    }
     if (typeof input === "string" && input === "/api/pick-file") {
       fileDialogs.push(new Headers(init?.headers).get("x-eyepiece-token"));
       return Promise.resolve(

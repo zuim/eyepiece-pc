@@ -14,6 +14,8 @@
     onConfirm: () => void;
   } = $props();
 
+  const uid = $props.id();
+  const titleId = `${uid}-title`;
   let dialog: HTMLDialogElement | undefined = $state();
 
   $effect(() => {
@@ -28,8 +30,8 @@
   }
 </script>
 
-<dialog bind:this={dialog} aria-labelledby="confirm-title" onclose={() => (open = false)}>
-  <h2 id="confirm-title">{title}</h2>
+<dialog bind:this={dialog} aria-labelledby={titleId} onclose={() => (open = false)}>
+  <h2 id={titleId}>{title}</h2>
   <p>{message}</p>
   <div class="actions">
     <button class="secondary" onclick={() => (open = false)}>Cancel</button>
