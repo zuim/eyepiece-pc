@@ -1,0 +1,133 @@
+// tinkerglass control protocol: the two control interfaces of the tinkerglass USB mode
+// ("tinkerglass control 0", ff/54/01, by convention the web app or `tg`; "tinkerglass control 1",
+// ff/54/02, by convention a PC app such as eyepiece-pc). Both interfaces are identical: the same
+// server (core.link, device/core/link) answers the same messages on each, and any client may use
+// either. docs/architecture.md, "Control link", has the design.
+//
+// Framing: one message per USB bulk transfer, in both directions:
+//
+//   u8 'T' (0x54) | u8 frame version (1) | u16le flags | u32le length | `length` bytes of protobuf
+//
+// Host to goggles: ClientMessage. Goggles to host: ServerMessage. A transfer whose size is a
+// multiple of the endpoint's packet size ends with a zero-length packet; receivers also use the
+// length to join a transfer that arrived in pieces. Flags are 0; a receiver drops a frame with a
+// flag it does not know, or another frame version. Payloads are at most 16 KiB.
+//
+// Compatibility: field numbers are permanent, unknown fields are skipped, and new requests and
+// replies are new oneof members (a server answers a request it does not know with
+// CODE_UNKNOWN_REQUEST). `protocol` changes only for an incompatible change of meaning.
+// Copies of this file live in other programs (eyepiece-pc's contract/); change it here first.
+syntax = "proto3";
+
+package tinkerglass.control.v1;
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_V1 = 1;                  // this file
+}
+
+message ClientMessage {
+  oneof body {
+    Hello hello = 1;
+    Request request = 2;
+  }
+  reserved 3 to 15;                 // Subscribe, Unsubscribe, ... (later)
+}
+
+message ServerMessage {
+  oneof body {
+    Welcome welcome = 1;
+    Response response = 2;
+  }
+  reserved 3 to 15;                 // Event (status, log line, pose, telemetry; later)
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_WEB_APP = 1;
+  ROLE_PC_APP = 2;
+  ROLE_CLI = 3;
+}
+
+// The client's first message on an interface. The server answers with Welcome; a client skips
+// anything before it (a reply to an earlier client may still be queued on the IN endpoint).
+message Hello {
+  Role role = 1;
+  uint32 protocol = 2;              // the client's Protocol
+  string client = 3;                // name and version, for the goggles' log ("eyepiece-pc 0.6.0")
+}
+
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_LAUNCH = 1;            // Request.launch
+  CAPABILITY_STATUS = 2;            // Request.status
+}
+
+message Welcome {
+  uint32 protocol = 1;              // the server's Protocol
+  string version = 2;               // the running tinkerglass build
+  uint32 interface = 3;             // which control interface this is: 0 or 1
+  repeated Capability capabilities = 4;
+}
+
+message Request {
+  uint32 id = 1;                    // echoed in the Response; chosen by the client
+  oneof body {
+    Launch launch = 2;
+    GetStatus status = 3;
+  }
+  reserved 4 to 31;                 // settings, logs, ... (later)
+}
+
+enum Code {
+  CODE_OK = 0;
+  CODE_UNKNOWN_REQUEST = 1;         // this server does not know the request
+  CODE_INVALID = 2;                 // malformed (bad argument, missing field)
+  CODE_NOT_INSTALLED = 3;           // no such app entry in the installed version
+  CODE_NO_UI = 4;                   // the goggles' menu did not take the request (UI not running)
+  CODE_ALREADY_RUNNING = 5;         // Launch without `replace` while the app runs; body says which
+  CODE_FAILED = 6;                  // the app did not start, or exited during its start
+  CODE_TIMEOUT = 7;                 // the app started but did not report ready in time
+}
+
+message Response {
+  uint32 id = 1;
+  Code code = 2;
+  string message = 3;               // a sentence for people when code is not CODE_OK
+  oneof body {
+    Launched launch = 4;
+    Status status = 5;
+  }
+}
+
+// Start an app the way a tap in the goggles' menu does (core.menu's launch request: the same
+// environment and SELinux domain as the UI), with `args` after the entry's own arguments. The
+// server answers once the app is ready (it wrote `ready` with its pid into its run dir), when
+// `ready_timeout_ms` is over, or at once after the start with `ready_timeout_ms` 0.
+message Launch {
+  string entry = 1;                 // menu entry id, or mod id (its first app entry): "pcdisplay"
+  repeated string args = 2;         // no whitespace inside an argument; at most 12
+  bool replace = 3;                 // start even if the app runs (the app decides how to take over)
+  uint32 ready_timeout_ms = 4;      // capped at 15000
+}
+
+message Launched {
+  uint32 pid = 1;
+  bool ready = 2;
+}
+
+message GetStatus {}
+
+message Status {
+  string version = 1;               // the running tinkerglass build
+  string session = 2;               // "boot" or "start" (how the session was started)
+  bool healthy = 3;                 // the session's health check passed
+  repeated App apps = 4;            // the installed app entries (menu entries with a program)
+}
+
+message App {
+  string entry = 1;
+  string label = 2;
+  uint32 pid = 3;                   // 0: not running
+  bool ready = 4;
+}

@@ -896,7 +896,7 @@ mod tests {
         let addr = std::env::var("EYEPIECE_TEST_BRIDGE").expect("EYEPIECE_TEST_BRIDGE is required");
         let transport = match std::env::var("EYEPIECE_TEST_TRANSPORT").as_deref().unwrap_or("tcp") {
             "tcp" => eyepiece_link::LinkTransport::Tcp,
-            "usb-bulk" => eyepiece_link::LinkTransport::UsbBulk { serial: None },
+            "usb-bulk" => eyepiece_link::LinkTransport::UsbBulk { serial: None, launch: None },
             value => panic!("unsupported EYEPIECE_TEST_TRANSPORT: {value}"),
         };
         let codec = std::env::var("EYEPIECE_TEST_CODEC").unwrap_or_else(|_| "h264".into());

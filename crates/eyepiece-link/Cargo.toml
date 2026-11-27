@@ -1,6 +1,6 @@
 [package]
 name = "eyepiece-link"
-description = "Eyepiece wire protocol, connection to pcdisplay_bridge, clock sync, stats, adb helpers (no FFmpeg)"
+description = "Eyepiece wire protocol, connection to pcdisplay_bridge, the goggles' control link, clock sync, stats (no FFmpeg)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
