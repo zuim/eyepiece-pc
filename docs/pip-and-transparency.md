@@ -42,11 +42,10 @@ eyepiece-pc --gui-opacity 50 --pane-opacity 80
 
 ## Opacity
 
-- `--gui-opacity 0..100` (default 100) sets the DJI GUI plane's opacity, separately from video transparency.
-  It needs a bridge advertising `GUI_ALPHA`. tinkerglass's PC Display does not: it hides the DJI GUI completely
-  while a stream is configured, so the option is ignored with a notice there (the stream still starts). The
-  setting stays while a reconnect bridge retains a frame; otherwise the goggles return to stock when the
-  bridge releases the GUI or exits.
+- `--gui-opacity 0..100` (default 0) shows the goggles' own UI over the picture at that opacity, separately from
+  video transparency; 0 hides it. While it is hidden the UI gets no buttons. While it shows, the UI gets them,
+  except OK (recenters head tracking) and, for a bridge started from the menu, Back (ends it) while no UI menu is
+  open. It needs a bridge advertising `GUI_ALPHA`, and ends with the connection.
 - `--pane-opacity 0..100` (default 100) fades the pane. It multiplies source and colour-key alpha, so
   transparent pixels stay transparent. The fade happens on the goggles, so preview and dumps are unchanged. It
   needs a bridge advertising `PANE_ALPHA`.
@@ -56,13 +55,10 @@ Both apply live from the [web UI](web-ui.md), without restarting the decoder. Se
 
 ## Bridge requirements and reconnecting
 
-- Deployment starts the bridge with `-1` (it exits with the session). tinkerglass's PC Display needs no `-R` for a
-  pane; with `--no-deploy`, start the bridge from More > PC Display.
-- A bridge without `PANE_RECONNECT` (tinkerglass's) retains nothing: a disconnect releases the display, and
-  `--reconnect` sets the pane up again on reconnect.
-- With `--reconnect` the bridge keeps the last image on screen while disconnected. Reconnecting with the same
-  configuration resumes the stream; a different geometry, pixel format or codec replaces the retained stream, and
-  the image can disappear while the new decoder starts. Stop the persistent bridge when finished.
+- eyepiece-pc starts the bridge with `-1` (it exits with the session); panes need that mode. With `--no-deploy`,
+  start the bridge from More > PC Display, which offers mono panel video only.
+- Nothing is kept across a disconnect: the display is released, and `--reconnect` sets the stream, the pane and
+  both opacities up again on the new connection.
 
 ## Live changes
 

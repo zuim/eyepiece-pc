@@ -1384,7 +1384,7 @@ mod tests {
         let desired = Args { gui_opacity: 25, pane_opacity: 50, ..args };
         queue_gui_update(&mut session, &desired, &tx);
         queue_gui_update(&mut session, &desired, &tx);
-        assert_eq!(session.args.gui_opacity, 100);
+        assert_eq!(session.args.gui_opacity, 0);
         assert_eq!(session.args.pane_opacity, 100);
         let update = control.gui_updates.lock().unwrap().pop_front().unwrap();
         assert_eq!((update.opacity, update.pane), (25, false));

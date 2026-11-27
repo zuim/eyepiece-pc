@@ -54,15 +54,11 @@ The log is `/data/vendor/tinkerglass/run/pcdisplay/bridge.log`.
 
 ## tinkerglass differences
 
-- **Capabilities.** The bridge advertises `STEREO`, `PANE_BGRA`, `PANE_OPAQUE_BGRA`, `PANE_ALPHA` and `RECONFIG`.
-  It does not advertise `GUI_ALPHA`, `GUI_ALPHA_ACTIVE` or `PANE_RECONNECT`: while a `Configure` is active it hides
-  the DJI GUI completely (through tinkerglass's display service), and a disconnect releases everything. The PC
-  treats the missing capabilities as unavailable: `--gui-opacity` is ignored with a notice, the stream still starts.
-- **Panes and the full-panel stream** both work in the same bridge process, without `-R`.
-- **Transport.** The USB video interface needs no bridge option (`-B` is gone); see
-  [transports](../transports.md). There is no USB network (RNDIS) mode.
-- **No overlay mod, no backdrop hook.** The GUI backdrop handshake and the `eyepiece.*` files below belong to the
-  natartos-era bridge.
+- **Capabilities.** A bridge started by the PC (`-1`) advertises `STEREO`, `PANE_BGRA`, `PANE_OPAQUE_BGRA`,
+  `PANE_ALPHA`, `RECONFIG` and `GUI_ALPHA`. One started from the goggles' menu has already opened its decoder
+  for the waiting screen, so it offers mono panel video and `GUI_ALPHA` only.
+- **Nothing outlives a connection.** A disconnect releases the stream, the pane and the GUI opacity.
+- **Transport.** The USB video interface needs no bridge option; see [transports](../transports.md).
 
 ## Display modes
 
@@ -79,7 +75,7 @@ The goggles have **no display scaler**; the PC scales to the requested size.
 
 ### GFX1 panes
 
-- Requires hardware decode on VOP0 and a bridge started with `-1` or `-R`. The bridge
+- Requires hardware decode on VOP0 and a bridge started with `-1`. The bridge
   advertises the pane capabilities only in that mode and acquires GFX1 without stopping its
   current owner; before using GFX1 it stops `dji_arhome` if that service is enabled and
   running, and restores it when the bridge exits. If the service was already disabled or stopped,
@@ -93,8 +89,6 @@ The goggles have **no display scaler**; the PC scales to the requested size.
   opaque). The bridge reconstructs ARGB with NEON-optimised, multi-threaded staging and
   retains the last staged image so opacity changes need no new frame. Fullscreen transparency
   therefore means a 3840×1080 stream.
-- GFX1 acquisition can leave the GUI and GFX1 both at blending order 1. The overlay moves a colliding GUI to
-  order 2, above GFX1, and the bridge refreshes blending even at GUI alpha 255.
 - Opaque H.264 panes up to 1280×720 default to 20 decoder buffers for small VideoToolbox
   streams with large reference counts; `-F` overrides this.
 - When the decode queue backs up, the bridge skips some decoded GFX1 frames before conversion
@@ -116,60 +110,22 @@ A running GFX1 stream can be replaced by sending another `Configure` (see
 - A VIDEO0 decoder, once open, is kept until the bridge exits; replacing it is rejected.
 - Opacity is preserved across reconfiguration.
 
-### Retained sessions (`-R`)
-
-With `-R` the bridge stays running after the client disconnects and keeps the last GFX1 frame
-on screen, and the DJI GUI stays suppressed behind it. A reconnecting client sends `Configure`
-again: an identical request resumes, a different one replaces the retained stream and the image
-may disappear while the new decoder starts. Quit the persistent bridge when finished.
-
 ### GUI and pane opacity
 
-- **GUI opacity** is applied by the overlay mod on the DJI GUI plane and acknowledged only
-  after the display API succeeds. It is held by a lock the bridge releases on disconnect; the
-  overlay then restores stock blending, unless a `-R` pane is retained. Fullscreen GUI hiding
-  takes precedence and rejects opacity changes.
+- **GUI opacity** (`GuiAlpha`, the PC's `--gui-opacity`) is the opacity of the goggles' own UI, which lies above
+  the video and the pane. tinkerglass's display service sets it on the GUI plane while the bridge holds its
+  display lease. A connection starts at 0: the UI is hidden and gets no buttons. Above 0 the UI is shown and gets
+  the buttons, except the ones the bridge uses while no UI menu is open: OK recenters head tracking, and Back
+  ends a bridge started from the menu. The opacity ends with the connection.
 - **Pane opacity** multiplies source and colour-key alpha. Alpha panes use pixel blending;
   opaque panes use hardware global alpha.
 
-### GUI backdrop suppression
-
-With no air-unit video the DJI GUI draws an opaque background layer that would hide GFX1 and
-VIDEO0. While a GUI-visible VIDEO0 or GFX1 stream is displayed, the Eyepiece mod suppresses that
-layer through a hook, and restores DJI's requested visibility after the bridge exits or crashes.
-A retained `-R` frame keeps suppression active. The hook only works with the `libew_gls.so` build
-ID `54323da7526004b9e5c3d75d172539e5`, and the bridge refuses these streams if the hook does not
-acknowledge the request. The mechanism is described in
-[display composition](display-composition.md#gui-backdrop-suppression). Air-unit video behaviour
-with the hook installed has not been tested.
-
 ## Bridge options
 
-*tinkerglass:* the PC Display bridge takes `-p -A -V -H -b -1 -N -F -S -L -O -M -Q -l -Z -h`; `-B`, `-R`, `-s` and `-c`
-below are natartos-era options it does not have (`-U` is accepted and ignored).
-
-```text
--p PORT      TCP port on 127.0.0.1 (default 42420)
--A           listen on all interfaces instead of loopback
--B           add the dedicated FunctionFS bulk interface (experimental)
--s WxH       output dimensions (default 1920x1080)
--c N         colour-convert threads (default 4)
--V           no video (head tracking only)
--H           no head tracking
--Z           only send the MCU head-attitude stop, then exit (recovery)
--b           exit on Back key (menu launches)
--1           exit after the first client disconnects
--R           allow matching GFX1 sessions to reconnect; stay running until quit
--F N         hw: number of frame buffers (default 12)
--S DIR       hw: duss_hal_mem_sync(frame, DIR) before reading frames
--O plane[:M] zero-copy scan-out on VOP mask M (1 = VOP0, 3 = both; default plane:1)
--L R,F,V     hw: decoder start-config knobs (no_reorder default 1, +0x24, +0x2c)
--N           null decoder (protocol and latency plumbing test; nothing is displayed)
--l FILE      log file (tinkerglass: eyepiece-pc passes /data/vendor/tinkerglass/run/pcdisplay/bridge.log)
-```
-
-Direct VIDEO0 output is the default. GUI opacity and pane alpha are configured through the
-protocol, not through options. GFX1 panes use BGRA output and manage `dji_arhome` while active.
+The options are listed in tinkerglass's
+[PC Display README](https://github.com/tinkerglass-org/tinkerglass/blob/main/mods/pcdisplay/README.md#bridge-options).
+eyepiece-pc starts the bridge with `-1` through core.menu's launch request; GUI opacity and pane alpha are
+configured through the protocol, not through options.
 
 ## Safety
 
@@ -179,10 +135,9 @@ protocol, not through options. GFX1 panes use BGRA output and manage `dji_arhome
   parent-death signal) and the helper dying (the bridge runs a stopper). If the stream is ever
   left running, run `/vendor/tinkerglass/current/mods/pcdisplay/bin/pcdisplay_bridge -Z`; it sends only the stop
   and exits.
-- **Files.** At runtime the bridge writes only under `/data/local/tmp`: `eyepiece.log`, `eyepiece.backdrop`
-  (the GUI backdrop handshake), `eyepiece.gui-alpha` (the GUI opacity request) and `eyepiece.bulk-state` (the
-  USB bulk recovery snapshot). It never writes `/system`, `/vendor` or any partition. The overlay restores
-  display state when the bridge exits or crashes.
+- **Files.** At runtime the bridge writes only under tinkerglass's run directory
+  (`/data/vendor/tinkerglass/run`): its log and the display lease. It never writes `/system`, `/vendor` or any
+  partition. The lease is a file lock, so the display service restores the UI when the bridge exits or crashes.
 - **`dji_arhome`.** If the bridge is forcibly killed before cleanup, restore the service as
   described under [GFX1 panes](#gfx1-panes).
 - **Installing is the only write to `/vendor`**, and it needs a deliberate remount; see
@@ -191,7 +146,7 @@ protocol, not through options. GFX1 panes use BGRA output and manage `dji_arhome
 
 ## Internals
 
-- `eyepiece_bridge.c` handles connections, requests and the decode queue. A single decoder
+- `pcdisplay_bridge.c` handles connections, requests and the decode queue. A single decoder
   thread owns the decoder: it applies `Configure`, pane opacity changes and disconnect drains,
   and decodes queued access units.
 - `wire.c` validates and (de)serializes the generated protobuf `Envelope` messages, which the bridge
@@ -202,7 +157,8 @@ protocol, not through options. GFX1 panes use BGRA output and manage `dji_arhome
   on a separate thread.
 - `dispout.c` drives the display, tracks scan-out buffers across VOPs, and reclaims dropped frames. A
   buffer rejected by every VOP stays with its caller.
-- `usb_bulk.c` manages FunctionFS. `headtrack.c` isolates the MCU bus client in a forked helper process.
+- `usb_bulk.c` pumps the USB video interface's endpoints (tinkerglass's USB service owns the function).
+  `headtrack.c` gets the head attitude from tinkerglass's hub.
 
 Ownership rules to keep when changing decoder, display or reconnect code:
 

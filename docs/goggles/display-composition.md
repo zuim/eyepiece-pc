@@ -87,10 +87,12 @@ Evidence: `libduml_fb.so` SHA-256 `ed7e912d70dde5450b7e9ac27416f7b3dfb41830285a0
 
 ## GUI backdrop suppression
 
-With no air-unit video the goggles draw a background that hides GFX1 and VIDEO0. The Eyepiece mod suppresses it
-with a hook, only for the `libew_gls.so` build with ID `54323da7526004b9e5c3d75d172539e5` (SHA-256
-`3021cebd64993711a922647afed2b0694c74db0004bef6a7e3e8804cfb9cff61`). Offsets below are ELF virtual addresses for
-that binary and are not portable.
+With no air-unit video the goggles' UI draws a background that hides GFX1 and VIDEO0. While the UI is hidden
+(GUI opacity 0, the default) this does not matter. With a GUI opacity above 0 the background shows over the
+picture at that opacity; tinkerglass does not suppress it yet. natartos' Eyepiece mod did, with a hook that only
+worked for the `libew_gls.so` build with ID `54323da7526004b9e5c3d75d172539e5` (SHA-256
+`3021cebd64993711a922647afed2b0694c74db0004bef6a7e3e8804cfb9cff61`). This section records how that layer works.
+Offsets below are ELF virtual addresses for that binary and are not portable.
 
 **The layer.** `ZV902Application__Init` calls `DuFPVApplication__Init`, which initialises a
 `DuBackgroundBackgroundLayer` **embedded** at root + `0x1020` and adds it to the root group. Its image child is
@@ -111,20 +113,15 @@ upgrade-status branch, so the property must not be faked globally.
 **Two visibility paths.** `MxLayerLayer_onUpdate` reads the outlet and calls `CoreGroup__OnSetVisible` directly,
 and `DuBackgroundBackgroundLayer_onActive` calls it with the byte at layer + `0x311`. Both dispatch through VMT slot
 `0xd8`, which resolves to `CoreGroup_OnSetVisible`, so hooking `onActive` alone cannot suppress the layer. The mod
-replaces only this class's visibility slot with a wrapper that remembers the latest stock request, forces the layer
-invisible only while PC video is displayed, and restores the request afterwards. `layer + 0x311` and the global
-aircraft property are left alone. The wrapper logic is in `mods/eyepiece/backdrop.h`.
+replaced only this class's visibility slot with a wrapper that remembered the latest stock request, forced the layer
+invisible only while PC video was displayed, and restored the request afterwards. `layer + 0x311` and the global
+aircraft property were left alone.
 
 **GUI-thread work.** `EwGuiRun` creates a GUI task whose loop calls `EwProcessSignals` through the PLT at
 `0x968a58` (relocation `0x6cdff50`; the only call site) before `CoreRoot__DoesNeedUpdate` and rendering. The hook
-applies pending hide and restore requests there, on the GUI thread, with the original setter, and makes the loop
-take the redraw path. A worker thread must never call the setter itself: cross-thread Embedded Wizard calls hang.
-
-**Handshake.** Before displaying PC video the bridge opens `/data/local/tmp/eyepiece.backdrop`, takes an exclusive
-`flock`, writes a request ID and waits for the hook to write the same ID back as its acknowledgement (typically 5 to
-19 ms). If the hook does not acknowledge, the bridge refuses the stream. The kernel drops the lock when the bridge
-dies, and the GUI then restores the latest stock request by itself. The lock covers displayed PC video, including
-`-R` retained frames, and not head-tracking-only connections or decoder startup failures.
+applied pending hide and restore requests there, on the GUI thread, with the original setter. A worker thread must
+never call the setter itself: cross-thread Embedded Wizard calls hang. (tinkerglass's core.display runs its own
+UI-thread work at the same place.)
 
 ## Transparency transport
 

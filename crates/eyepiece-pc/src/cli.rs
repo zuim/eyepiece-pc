@@ -132,8 +132,9 @@ pub struct Args {
     /// GFX1 picture-in-picture pane: WIDTHxHEIGHT+X+Y (live changes require a compatible bridge)
     #[arg(long)]
     pub pane: Option<String>,
-    /// DJI GUI opacity, 0 to 100 percent
-    #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]
+    /// Opacity of the goggles' UI over the picture, 0 to 100 percent; 0 (the default) hides it and
+    /// keeps the buttons from it
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=100))]
     pub gui_opacity: u8,
     /// GFX1 pane opacity, 0 to 100 percent; multiplies source/color-key alpha
     #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]

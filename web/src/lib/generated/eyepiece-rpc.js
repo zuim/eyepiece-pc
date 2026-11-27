@@ -84,13 +84,13 @@ export const eyepiece = $root.eyepiece = (() => {
              * PaneFormat enum.
              * @name eyepiece.rpc.v1.PaneFormat
              * @enum {number}
-             * @property {number} PANE_NV12=0 PANE_NV12 value
+             * @property {number} PANE_FORMAT_UNSPECIFIED=0 PANE_FORMAT_UNSPECIFIED value
              * @property {number} PANE_BGRA=1 PANE_BGRA value
              * @property {number} PANE_OPAQUE_BGRA=2 PANE_OPAQUE_BGRA value
              */
             v1.PaneFormat = (function() {
                 const valuesById = {}, values = Object.create(valuesById);
-                values[valuesById[0] = "PANE_NV12"] = 0;
+                values[valuesById[0] = "PANE_FORMAT_UNSPECIFIED"] = 0;
                 values[valuesById[1] = "PANE_BGRA"] = 1;
                 values[valuesById[2] = "PANE_OPAQUE_BGRA"] = 2;
                 return values;
@@ -116,26 +116,20 @@ export const eyepiece = $root.eyepiece = (() => {
              * @enum {number}
              * @property {number} CAPABILITY_NONE=0 CAPABILITY_NONE value
              * @property {number} CAPABILITY_STEREO=1 CAPABILITY_STEREO value
-             * @property {number} CAPABILITY_PANE_NV12=2 CAPABILITY_PANE_NV12 value
              * @property {number} CAPABILITY_PANE_BGRA=4 CAPABILITY_PANE_BGRA value
              * @property {number} CAPABILITY_PANE_OPAQUE_BGRA=8 CAPABILITY_PANE_OPAQUE_BGRA value
-             * @property {number} CAPABILITY_PANE_RECONNECT=16 CAPABILITY_PANE_RECONNECT value
              * @property {number} CAPABILITY_RECONFIG=32 CAPABILITY_RECONFIG value
              * @property {number} CAPABILITY_GUI_ALPHA=64 CAPABILITY_GUI_ALPHA value
-             * @property {number} CAPABILITY_GUI_ALPHA_ACTIVE=128 CAPABILITY_GUI_ALPHA_ACTIVE value
              * @property {number} CAPABILITY_PANE_ALPHA=256 CAPABILITY_PANE_ALPHA value
              */
             v1.BridgeCapability = (function() {
                 const valuesById = {}, values = Object.create(valuesById);
                 values[valuesById[0] = "CAPABILITY_NONE"] = 0;
                 values[valuesById[1] = "CAPABILITY_STEREO"] = 1;
-                values[valuesById[2] = "CAPABILITY_PANE_NV12"] = 2;
                 values[valuesById[4] = "CAPABILITY_PANE_BGRA"] = 4;
                 values[valuesById[8] = "CAPABILITY_PANE_OPAQUE_BGRA"] = 8;
-                values[valuesById[16] = "CAPABILITY_PANE_RECONNECT"] = 16;
                 values[valuesById[32] = "CAPABILITY_RECONFIG"] = 32;
                 values[valuesById[64] = "CAPABILITY_GUI_ALPHA"] = 64;
-                values[valuesById[128] = "CAPABILITY_GUI_ALPHA_ACTIVE"] = 128;
                 values[valuesById[256] = "CAPABILITY_PANE_ALPHA"] = 256;
                 return values;
             })();
