@@ -12,10 +12,14 @@ Run `eyepiece-pc --help` for every option.
   stderr, exit when the stream ends. One-run options (`--list`, `--no-connect`, `--dump`, `--frames`,
   `--duration`, `--preview`, `--print-pose`) select it by themselves, so a benchmark never changes the saved
   settings; `--web` keeps the web UI with them.
-- On Windows, a start without a terminal of its own (double-click, shortcut) hides the console window, opens
-  the web UI and shows a notification-area icon: click opens the web UI, the menu starts or stops the stream
-  and quits. It does not start a stream by itself, but resumes one that was running when it was last closed.
-  A second double-click opens the running instance. `--tray` shows the icon from a terminal too.
+- A desktop start behaves the same on every platform: a double-click on `eyepiece-pc.exe` (Windows, the
+  console window closes), the app from Finder or the Dock (macOS), or the AppImage from a file manager or the
+  desktop entry (Linux, which passes `--desktop`). It opens the web UI and shows a tray icon (notification
+  area; menu bar on macOS; on Linux a StatusNotifierItem, shown by KDE and most desktops, by GNOME with the
+  AppIndicator extension): open the web UI, start or stop the stream, quit. It does not start a stream by
+  itself, but resumes one that was running when it was last closed. A second start opens the running
+  instance. Without a tray host eyepiece-pc runs on; the web UI's **Quit** (also there in every mode) ends
+  it. `--tray` shows the icon from a terminal too; builds without the `tray` feature have none.
 - Settings live in `%APPDATA%\eyepiece\config\eyepiece-rpc.json` on Windows, `~/.config/eyepiece/` on Linux
   (`$XDG_CONFIG_HOME`) and `~/Library/Application Support/eyepiece/` on macOS; `EYEPIECE_CONFIG_DIR`
   points elsewhere (portable installs, tests). The path is printed at start.

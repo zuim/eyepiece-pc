@@ -8,7 +8,7 @@ pub mod desktop;
 pub mod preview;
 pub mod rpc;
 pub mod session;
-#[cfg(windows)]
+#[cfg(feature = "tray")]
 mod tray;
 
 pub use session::{run, Config, Control, Events, SourceKind};

@@ -1,5 +1,10 @@
-//! The Windows notification-area icon of a double-click start: open the web UI, start or stop
-//! the stream, quit. Click opens the web UI; the menu is on the right button.
+//! The tray icon of a desktop start (notification area on Windows and Linux, menu bar on macOS):
+//! open the web UI, start or stop the stream, quit. Click opens the web UI where the platform
+//! reports clicks; the menu is on the right button (Windows, Linux) or the icon (macOS).
+//!
+//! Linux uses StatusNotifierItem over D-Bus (KDE, most other desktops; GNOME with the
+//! AppIndicator extension). Without a tray host the icon simply does not appear and the web UI's
+//! Quit remains.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -13,9 +18,11 @@ pub enum Action {
     Quit,
 }
 
-/// Run the icon on this thread (it owns the window messages) until `exit` is set or Quit is
-/// chosen. `phase` returns the session phase (idle, starting, running, stopping) when it changed.
+/// Run the icon on this thread until `exit` is set or Quit is chosen. On macOS this must be the
+/// main thread: it also runs the application's event loop. `phase` returns the session phase
+/// (idle, starting, running, stopping) when it changed.
 pub fn run(act: &dyn Fn(Action), phase: &mut dyn FnMut() -> Option<String>, exit: &AtomicBool) -> Result<(), String> {
+    let events = EventLoop::new()?;
     let open = MenuItem::new("Open eyepiece-pc", true, None);
     let start = MenuItem::new("Start stream", false, None);
     let stop = MenuItem::new("Stop stream", false, None);
@@ -32,13 +39,13 @@ pub fn run(act: &dyn Fn(Action), phase: &mut dyn FnMut() -> Option<String>, exit
     .map_err(|e| format!("tray menu: {e}"))?;
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_menu_on_left_click(false)
+        .with_menu_on_left_click(cfg!(target_os = "macos"))
         .with_tooltip("eyepiece-pc")
         .with_icon(icon()?)
         .build()
         .map_err(|e| format!("tray icon: {e}"))?;
     while !exit.load(Ordering::Relaxed) {
-        pump_messages();
+        events.pump();
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             let action = if event.id == open.id() {
                 Action::Open
@@ -76,13 +83,48 @@ pub fn run(act: &dyn Fn(Action), phase: &mut dyn FnMut() -> Option<String>, exit
     Ok(())
 }
 
-fn pump_messages() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE};
-    let mut message: MSG = unsafe { std::mem::zeroed() };
-    while unsafe { PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) } != 0 {
-        unsafe {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+/// The platform's event delivery for the icon on this thread.
+struct EventLoop {
+    #[cfg(target_os = "macos")]
+    app: objc2::rc::Retained<objc2_app_kit::NSApplication>,
+}
+
+impl EventLoop {
+    fn new() -> Result<EventLoop, String> {
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+            let mtm = objc2::MainThreadMarker::new().ok_or("the menu-bar icon needs the main thread")?;
+            let app = NSApplication::sharedApplication(mtm);
+            // a menu-bar item only: no Dock icon, no menu bar of its own
+            app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+            app.finishLaunching();
+            Ok(EventLoop { app })
+        }
+        #[cfg(not(target_os = "macos"))]
+        Ok(EventLoop {})
+    }
+
+    /// Deliver the pending window-system events (Linux: none, D-Bus runs on its own threads).
+    fn pump(&self) {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE};
+            let mut message: MSG = unsafe { std::mem::zeroed() };
+            while unsafe { PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) } != 0 {
+                unsafe {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_app_kit::NSEventMask;
+            let mode = unsafe { objc2_foundation::NSDefaultRunLoopMode };
+            while let Some(event) = self.app.nextEventMatchingMask_untilDate_inMode_dequeue(NSEventMask::Any, None, mode, true) {
+                self.app.sendEvent(&event);
+            }
         }
     }
 }

@@ -243,11 +243,14 @@ pub struct Args {
     #[arg(long, hide = true, conflicts_with = "no_web")]
     #[serde(skip)]
     pub web: bool,
-    /// Windows: show the notification-area icon (open the web UI, start/stop, quit); the
-    /// default when started by a double-click
-    #[arg(long, conflicts_with = "no_web", hide = !cfg!(windows))]
+    /// show the tray icon (open the web UI, start/stop, quit); the default for a desktop start
+    #[arg(long, conflicts_with = "no_web", hide = !cfg!(feature = "tray"))]
     #[serde(skip)]
     pub tray: bool,
+    /// started from a desktop launcher (the .desktop file): behave like a double-click start
+    #[arg(long, hide = true, conflicts_with = "no_web")]
+    #[serde(skip)]
+    pub desktop: bool,
 }
 
 /// Options that only make sense for one run (benchmarks, diagnostics): they select the
@@ -255,7 +258,7 @@ pub struct Args {
 const ONE_RUN_OPTIONS: &[&str] = &["list", "no_connect", "dump", "frames", "duration", "preview", "print_pose"];
 
 /// Options about the frontend itself, never saved as settings.
-pub(crate) const FRONTEND_OPTIONS: &[&str] = &["web", "no_web", "open_web", "tray"];
+pub(crate) const FRONTEND_OPTIONS: &[&str] = &["web", "no_web", "open_web", "tray", "desktop"];
 
 /// How the binary runs: with the web UI (the default) or as a plain command-line streamer.
 #[derive(Debug, PartialEq)]
@@ -264,14 +267,14 @@ enum Mode {
     CommandLine,
 }
 
-/// `desktop`: started without a terminal (a double-click on Windows).
+/// `desktop`: started without a terminal (a double-click, Finder, a desktop launcher).
 fn mode(a: &Args, overrides: &std::collections::HashSet<String>, desktop: bool) -> Mode {
     let one_run = ONE_RUN_OPTIONS.iter().any(|name| overrides.contains(*name));
     if a.no_web || one_run {
         return Mode::CommandLine;
     }
     Mode::Web(crate::rpc::WebOptions {
-        tray: cfg!(windows) && (a.tray || desktop),
+        tray: cfg!(feature = "tray") && (a.tray || desktop),
         // a double-click should show something: the web UI
         open_browser: a.open_web || desktop,
         // from a terminal `eyepiece-pc` streams at once, as it always did; a desktop start only
@@ -490,12 +493,12 @@ pub fn main() {
         }
         return;
     }
-    let desktop = crate::desktop::started_from_desktop();
     let matches = Args::command().get_matches();
     let overrides = explicit_options(&matches);
     let a = Args::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    if a.tray && !cfg!(windows) {
-        eprintln!("[eyepiece-pc] --tray is only available on Windows");
+    let desktop = a.desktop || crate::desktop::started_from_desktop();
+    if a.tray && !cfg!(feature = "tray") {
+        eprintln!("[eyepiece-pc] this build has no tray icon (feature tray)");
         std::process::exit(2);
     }
     if let Mode::Web(options) = mode(&a, &overrides, desktop) {
@@ -913,10 +916,10 @@ mod tests {
         }
         assert!(matches!(mode_of(&["--web"], false), Mode::Web(_)));
         assert!(Args::try_parse_from(["eyepiece-pc", "--no-web", "--open-web"]).is_err());
-        // a double-click: the browser opens, the stream only resumes, the tray icon on Windows
+        // a desktop start: the browser opens, the stream only resumes, the tray icon
         assert_eq!(
             mode_of(&[], true),
-            Mode::Web(crate::rpc::WebOptions { open_browser: true, tray: cfg!(windows), start: false, terminal: false })
+            Mode::Web(crate::rpc::WebOptions { open_browser: true, tray: cfg!(feature = "tray"), start: false, terminal: false })
         );
     }
 
