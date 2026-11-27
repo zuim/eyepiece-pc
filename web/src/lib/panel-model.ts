@@ -53,6 +53,11 @@ export const choiceLabels: Record<string, Record<string, string>> = {
     test: "Test Pattern",
     file: "Video File",
   },
+  dxgi_cursor: {
+    auto: "Automatic (when missing)",
+    on: "Always",
+    off: "Never",
+  },
   sync: {
     vblank: "Vertical Blank",
     poll: "Polling",
@@ -101,6 +106,7 @@ export const settingGroups = [
       "restore_token",
       "display_id",
       "dxgi",
+      "dxgi_cursor",
     ],
   ],
   [

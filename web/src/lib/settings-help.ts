@@ -19,6 +19,8 @@ export const settingsHelp: Record<string, string> = {
   cursor: "Include the cursor in PipeWire or ScreenCaptureKit capture.",
   display_id: "ScreenCaptureKit display ID; leave empty for the first available display.",
   dxgi: "Windows DXGI adapter and output indexes, separated by a comma.",
+  dxgi_cursor:
+    "Draws the mouse pointer into the stream: Desktop Duplication frames carry no hardware cursor. Automatic draws it only when the captured image does not already show it.",
   kms_simulate: "Use test surfaces with KMS timing instead of capturing display content.",
   fps: "Target frame rate; capture may be limited by the source refresh rate.",
   codec: "Choose H.264 or H.265 video encoding.",

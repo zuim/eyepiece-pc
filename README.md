@@ -52,8 +52,10 @@ notification area (click: open the web UI; right-click: start or stop the stream
 
 ## Known issues
 
-- **No mouse cursor in the stream on Windows 11 26H2.** With DXGI capture the cursor is missing from the
-  picture on Windows 11 26H2; on 25H2 it is shown. There is no workaround in eyepiece-pc yet.
+- **Mouse pointer on Windows (DXGI).** Desktop Duplication frames do not contain a hardware cursor, and on
+  Windows 11 26H2 the pointer went missing from the stream. eyepiece-pc now draws it itself
+  (`--dxgi-cursor auto`, the default: only when the captured image does not already show it; `on`, `off`).
+  Pointers on a rotated display are not handled yet.
 
 ## Documentation
 

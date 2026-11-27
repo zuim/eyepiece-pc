@@ -20,6 +20,7 @@ pub mod dxgi;
 #[cfg(target_os = "macos")]
 pub mod screencapturekit;
 
+pub mod cursor;
 pub mod pacer;
 pub mod layout;
 

@@ -52,6 +52,12 @@ By default the stream is 1920x1080, the goggles' panel size: they have no displa
 Every source is scaled to fit on the PC and letterboxed with black bars (`--no-letterbox`
 stretches instead). A [picture-in-picture pane](pip-and-transparency.md) is encoded at its own size.
 
+Mouse pointer (Windows, DXGI): the captured frames carry no hardware cursor, so eyepiece-pc draws it from
+the pointer position and shape Desktop Duplication reports (monochrome, colour and masked-colour shapes).
+`--dxgi-cursor auto` (default) draws it only when the image does not already show it (a software cursor),
+`on` always, `off` never. `cargo run -p eyepiece-capture --example dxgi-cursor -- auto 5 [output]` shows
+which case a machine is in.
+
 Stdin (both modes): `r` recenter, `i` force an IDR, `q` quit (each + Enter). Ctrl-C quits cleanly
 (twice: hard). `--dump out.h264` also writes the exact Annex-B stream; `--no-connect
 --duration 10` encodes without a bridge (command-line mode). See `eyepiece-pc --help` for all
