@@ -28,7 +28,7 @@ export const settingsHelp: Record<string, string> = {
   codec: "Choose H.264 or H.265 video encoding.",
   stereo: "Encode a side-by-side stereo 3D stream.",
   pane: "Enable picture in picture, then set the pane size and position on the goggles.",
-  gui_opacity: "Adjust DJI GUI opacity at runtime.",
+  gui_opacity: "Show the goggles' own UI over the picture at this opacity; 0 hides it. While it shows, the UI gets the buttons (OK still recenters head tracking while no menu is open).",
   pane_opacity: "Adjust GFX1 pane opacity at runtime.",
   alpha: "Enable transparency using source alpha or Key Color.",
   alpha_source: "Choose whether transparency comes from the source alpha channel or Key Color.",

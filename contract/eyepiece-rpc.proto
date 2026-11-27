@@ -22,7 +22,7 @@ enum StreamLayout {
 }
 
 enum PaneFormat {
-  PANE_NV12 = 0;
+  PANE_FORMAT_UNSPECIFIED = 0;  // invalid; was NV12, never implemented
   PANE_BGRA = 1;
   PANE_OPAQUE_BGRA = 2;
 }
@@ -35,13 +35,12 @@ enum PoseSource {
 enum BridgeCapability {
   CAPABILITY_NONE = 0;
   CAPABILITY_STEREO = 1;
-  CAPABILITY_PANE_NV12 = 2;
+  // 2 (NV12 pane), 16 (pane kept across clients) and 128 (a retained GUI alpha) are no
+  // longer used; never reuse them.
   CAPABILITY_PANE_BGRA = 4;
   CAPABILITY_PANE_OPAQUE_BGRA = 8;
-  CAPABILITY_PANE_RECONNECT = 16;
   CAPABILITY_RECONFIG = 32;
   CAPABILITY_GUI_ALPHA = 64;
-  CAPABILITY_GUI_ALPHA_ACTIVE = 128;
   CAPABILITY_PANE_ALPHA = 256;
 }
 
@@ -290,8 +289,8 @@ message Control {
 }
 
 // PC -> bridge. Position and size are panel pixels. Format 1 packs color and
-// straight grayscale alpha side by side, and 2 is opaque BGRA; format 0 (NV12)
-// is reserved. For packed alpha, luma 16 is transparent, 235 opaque; color uses
+// straight grayscale alpha side by side, and 2 is opaque BGRA; format 0 is
+// invalid. For packed alpha, luma 16 is transparent, 235 opaque; color uses
 // limited-range BT.709 and the encoded frame is twice the pane width.
 message Pane {
   uint32 x = 1;
@@ -315,17 +314,22 @@ message Pane {
 //
 // A later Configure replaces the active one. The sender stops sending old
 // video first and resumes with a keyframe after status 0. Repeating the active
-// configuration is a no-op that only requests a keyframe, which makes it the
-// way to resume a retained session after reconnecting. Pane opacity and GUI
-// opacity are unaffected.
+// configuration is a no-op that only requests a keyframe. Pane opacity and GUI
+// opacity are unaffected. Nothing outlives the connection: a disconnect
+// releases the stream, the pane and the GUI opacity.
 message Configure {
   uint32 codec = 1;
   uint32 layout = 2;
   optional Pane pane = 3;
 }
 
-// PC -> bridge. alpha is 0..255. Envelope.id is required and echoed in
-// GuiAlphaAck.
+// PC -> bridge, requires GUI_ALPHA. The opacity of the goggles' own UI (the
+// GUI plane, drawn above the video and the pane), alpha 0..255. A connection
+// starts at 0: the UI is hidden and gets no buttons. Above 0 the UI is shown
+// at that opacity and gets the buttons, except the ones the bridge uses itself
+// while no menu of the UI is open (OK recenters head tracking; Back ends a
+// bridge started from the goggles' menu). Envelope.id is required and echoed
+// in GuiAlphaAck.
 message GuiAlpha {
   reserved 1;
   uint32 alpha = 2;
@@ -359,10 +363,9 @@ message Frame {
 
 // Bridge -> PC upon connection. framebuffer dimensions are pixels; decoder
 // is 0 none, 1 software, 2 hardware. headtrack bit 0 means MCU pose received.
-// flags: bit 0 stereo, 1 NV12 pane, 2 packed-alpha pane, 3 opaque pane,
-// 4 pane reconnect, 5 live reconfiguration of a GFX1 pane, 6 GUI alpha control,
-// 7 active GUI alpha request, 8 pane alpha. Clients must check capabilities
-// before using these features.
+// flags (BridgeCapability): bit 0 stereo, 2 packed-alpha pane, 3 opaque pane,
+// 5 live reconfiguration of a GFX1 pane, 6 GUI alpha control, 8 pane alpha.
+// Clients must check capabilities before using these features.
 message Info {
   uint32 version = 1;
   uint32 framebuffer_width = 2;

@@ -31,7 +31,7 @@ Automatic selection does not switch transports after a connection is made.
 
 The ignored hardware regression exercises pane movement, resizing, packed alpha,
 fullscreen/PiP transitions, GUI/pane opacity acknowledgements, resumed frame reports
-and reconnect. Start a matching bridge (`pcdisplay_bridge -H`, no `-R`: reconnect retention needs `PANE_RECONNECT`, which tinkerglass's bridge does not advertise); run
+and reconnect. Start a matching bridge (`pcdisplay_bridge -H`); run
 only with stationary goggles, never while flying:
 
 ```sh

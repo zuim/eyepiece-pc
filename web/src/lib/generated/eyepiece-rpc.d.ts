@@ -31,7 +31,7 @@ export namespace eyepiece {
 
             /** PaneFormat enum. */
             enum PaneFormat {
-                PANE_NV12 = 0,
+                PANE_FORMAT_UNSPECIFIED = 0,
                 PANE_BGRA = 1,
                 PANE_OPAQUE_BGRA = 2
             }
@@ -46,13 +46,10 @@ export namespace eyepiece {
             enum BridgeCapability {
                 CAPABILITY_NONE = 0,
                 CAPABILITY_STEREO = 1,
-                CAPABILITY_PANE_NV12 = 2,
                 CAPABILITY_PANE_BGRA = 4,
                 CAPABILITY_PANE_OPAQUE_BGRA = 8,
-                CAPABILITY_PANE_RECONNECT = 16,
                 CAPABILITY_RECONFIG = 32,
                 CAPABILITY_GUI_ALPHA = 64,
-                CAPABILITY_GUI_ALPHA_ACTIVE = 128,
                 CAPABILITY_PANE_ALPHA = 256
             }
 
