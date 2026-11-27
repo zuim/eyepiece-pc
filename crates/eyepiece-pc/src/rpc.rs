@@ -412,7 +412,13 @@ fn default_args(schema: &Schema) -> Result<Args, String> {
     serde_json::from_value(args).map_err(|e| format!("invalid schema defaults: {e}"))
 }
 
+/// The web UI's settings: `EYEPIECE_CONFIG_DIR` if set (portable installs, tests), else the platform's
+/// config directory: `%APPDATA%\eyepiece\config` on Windows, `$XDG_CONFIG_HOME/eyepiece` (`~/.config/eyepiece`)
+/// on Linux, `~/Library/Application Support/eyepiece` on macOS.
 fn settings_path() -> Result<PathBuf, String> {
+    if let Some(dir) = std::env::var_os("EYEPIECE_CONFIG_DIR").filter(|dir| !dir.is_empty()) {
+        return Ok(PathBuf::from(dir).join("eyepiece-rpc.json"));
+    }
     directories::ProjectDirs::from("", "", "eyepiece")
         .map(|p| p.config_dir().join("eyepiece-rpc.json"))
         .ok_or_else(|| "cannot determine settings directory".into())
@@ -522,7 +528,7 @@ fn apply_cli_overrides(
     let cli_values = serde_json::to_value(args).map_err(|e| e.to_string())?;
     let mut changed = false;
     for name in overrides {
-        if name == "web" {
+        if cli::FRONTEND_OPTIONS.contains(&name.as_str()) {
             continue;
         }
         let setting = schema
@@ -1012,21 +1018,72 @@ pub fn run() -> Result<(), String> {
     run_worker(input_tx, input_rx, output_tx, None)
 }
 
-pub fn run_web(args: Args, overrides: std::collections::HashSet<String>) -> Result<(), String> {
-    web::run(args, overrides)
+/// How the web UI server starts ([`run_web`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WebOptions {
+    /// open the web UI in the default browser once it listens
+    pub open_browser: bool,
+    /// show the notification-area icon (Windows) and hide the console window
+    pub tray: bool,
+    /// start the stream at once (a terminal start), instead of only resuming a saved running state
+    pub start: bool,
+    /// print log lines and errors to stderr and read the r/i/q keys from stdin
+    pub terminal: bool,
+}
+
+/// Why [`run_web`] failed.
+#[derive(Debug)]
+pub enum WebError {
+    /// the static web app is missing (a development build without `pnpm build`)
+    NotBuilt(String),
+    Other(String),
+}
+
+impl std::fmt::Display for WebError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WebError::NotBuilt(e) | WebError::Other(e) => f.write_str(e),
+        }
+    }
+}
+
+impl From<String> for WebError {
+    fn from(e: String) -> Self {
+        WebError::Other(e)
+    }
+}
+
+/// Command-line options for the web UI's worker: explicit settings are saved, and `start`
+/// marks the stream as running.
+struct Startup {
+    args: Args,
+    overrides: std::collections::HashSet<String>,
+    start: bool,
+}
+
+/// Serve the web UI on loopback until Ctrl-C, Quit (tray), `q` (stdin) or a worker failure.
+pub fn run_web(args: Args, overrides: std::collections::HashSet<String>, options: WebOptions) -> Result<(), WebError> {
+    web::run(Startup { args, overrides, start: options.start }, options)
+}
+
+/// Where the web UI keeps its settings (the platform's config directory).
+pub fn settings_file() -> Result<PathBuf, String> {
+    settings_path()
 }
 
 fn run_worker(
     input_tx: mpsc::Sender<Input>,
     input_rx: mpsc::Receiver<Input>,
     output_tx: SyncSender<Response>,
-    cli_overrides: Option<(Args, std::collections::HashSet<String>)>,
+    startup: Option<Startup>,
 ) -> Result<(), String> {
     let schema = schema()?;
     let path = settings_path()?;
     let mut saved = load(&path, &schema)?;
-    if let Some((args, overrides)) = cli_overrides {
-        if apply_cli_overrides(&mut saved, args, overrides, &schema)? {
+    if let Some(startup) = startup {
+        let changed = apply_cli_overrides(&mut saved, startup.args, startup.overrides, &schema)?;
+        if changed || (startup.start && !saved.desired_running) {
+            saved.desired_running |= startup.start;
             save(&path, &saved)?;
         }
     }

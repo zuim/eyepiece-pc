@@ -4,9 +4,12 @@
 //! [`eyepiece_link::stats::Snapshot`]s, the link and the encoded stream via [`session::Events`].
 
 pub mod cli;
+pub mod desktop;
 pub mod preview;
 pub mod rpc;
 pub mod session;
+#[cfg(windows)]
+mod tray;
 
 pub use session::{run, Config, Control, Events, SourceKind};
 pub use eyepiece_av as av;
