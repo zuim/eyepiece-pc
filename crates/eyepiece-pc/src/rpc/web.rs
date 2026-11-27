@@ -1,5 +1,7 @@
-use super::{Input, MAX_FRAME, Request, Response, decode_request, request, response, response_envelope, run_worker, wire};
-use crate::cli::Args;
+use super::{
+    Input, MAX_FRAME, Request, Response, Startup, WebError, WebOptions, decode_request, request, response,
+    response_envelope, run_worker, wire,
+};
 use axum::{
     Json, Router,
     body::Body,
@@ -21,27 +23,37 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread,
 };
 use subtle::ConstantTimeEq;
-use tokio::sync::{broadcast, mpsc as async_mpsc};
+use tokio::sync::{Notify, broadcast, mpsc as async_mpsc};
 use tower_http::services::ServeDir;
 
 const CLIENT_QUEUE: usize = 16;
 const REQUEST_QUEUE: usize = 16;
+
+/// Sites that may see whether eyepiece-pc runs (`/api/hello`): tinkerglass's web app, its pull
+/// request previews and its local development server. `EYEPIECE_DISCOVERY_ORIGINS` adds more
+/// (comma-separated origins).
+const DISCOVERY_ORIGINS: &[&str] = &["https://tinkerglass-org.github.io"];
+const DISCOVERY_ORIGIN_SUFFIXES: &[&str] = &[".tinkerglass-prs.pages.dev"];
 
 #[derive(Clone)]
 struct App {
     token: Arc<str>,
     hosts: Arc<HashSet<String>>,
     origins: Arc<HashSet<String>>,
+    discovery_origins: Arc<HashSet<String>>,
+    url: Arc<str>,
     requests: async_mpsc::Sender<ClientInput>,
     events: broadcast::Sender<Response>,
     previews: broadcast::Sender<Response>,
     next_client: Arc<AtomicU64>,
+    picking: Arc<AtomicBool>,
+    shutdown: Arc<Notify>,
 }
 
 enum ClientInput {
@@ -72,16 +84,18 @@ fn origin(value: &str) -> Result<(String, String), String> {
     Ok((format!("http://{authority}"), authority))
 }
 
-/// The static web app: EYEPIECE_WEB_DIR if set; otherwise `web/` next to the executable (release
-/// packages), then `web/build` of the checkout this binary was built from (development builds).
+/// The static web app: EYEPIECE_WEB_DIR if set; otherwise `web/` next to the executable (zip,
+/// tar.gz and AppImage packages) or in the bundle's
+/// `Contents/Resources` (macOS), then `web/build` of the checkout this binary was built from
+/// (development builds).
 fn web_dir() -> Result<PathBuf, String> {
     if let Some(dir) = std::env::var_os("EYEPIECE_WEB_DIR").map(PathBuf::from) {
         return if dir.is_dir() { Ok(dir) } else { Err(format!("EYEPIECE_WEB_DIR {} does not exist", dir.display())) };
     }
-    let packaged = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("web")));
+    let exe_dir = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let packaged = exe_dir.iter().flat_map(|dir| [dir.join("web"), dir.join("../Resources/web")]);
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/build");
     packaged
-        .into_iter()
         .chain([checkout.clone()])
         .find(|dir| dir.join("index.html").is_file())
         .ok_or_else(|| {
@@ -121,7 +135,7 @@ async fn protect(State(app): State<App>, request: HttpRequest<Body>, next: Next)
     let method_ok = matches!(
         *request.method(),
         axum::http::Method::GET | axum::http::Method::HEAD
-    );
+    ) || (request.method() == axum::http::Method::OPTIONS && request.uri().path() == "/api/hello");
     if !host_ok {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
@@ -150,6 +164,98 @@ async fn session(State(app): State<App>, headers: HeaderMap) -> HttpResponse {
         Json(serde_json::json!({ "token": app.token.as_ref(), "workerStatus": "running" })),
     )
         .into_response()
+}
+
+/// Whether a site may read `/api/hello`: the fixed tinkerglass origins, any loopback HTTP origin
+/// (tinkerglass's `./tg web`) and the configured extra origins.
+fn discovery_origin_allowed(origin: &str, extra: &HashSet<String>) -> bool {
+    if DISCOVERY_ORIGINS.contains(&origin) || extra.contains(origin) {
+        return true;
+    }
+    let Ok(uri) = origin.parse::<Uri>() else { return false };
+    let bare = matches!(uri.path_and_query().map(|p| p.as_str()), None | Some("") | Some("/"));
+    match (uri.scheme_str(), uri.host()) {
+        (Some("http"), Some("localhost" | "127.0.0.1")) => bare,
+        (Some("https"), Some(host)) => {
+            bare && uri.port().is_none()
+                && DISCOVERY_ORIGIN_SUFFIXES.iter().any(|suffix| {
+                    host.strip_suffix(suffix)
+                        .is_some_and(|label| !label.is_empty() && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Discovery for other local tools, chiefly tinkerglass's PC Display panel: tells an allowed site
+/// that eyepiece-pc runs, its version and where its web UI is. Carries nothing else (no token,
+/// no settings), and only allowed origins get the CORS header that lets them read it.
+async fn hello(State(app): State<App>, method: axum::http::Method, headers: HeaderMap) -> HttpResponse {
+    let mut response = if method == axum::http::Method::OPTIONS {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        Json(serde_json::json!({
+            "app": "eyepiece-pc",
+            "version": env!("CARGO_PKG_VERSION"),
+            "url": app.url.as_ref(),
+        }))
+        .into_response()
+    };
+    let headers_out = response.headers_mut();
+    headers_out.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+    headers_out.insert(header::VARY, header::HeaderValue::from_static("Origin"));
+    if let Some(origin) = headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()) {
+        if discovery_origin_allowed(origin, &app.discovery_origins) {
+            if let Ok(value) = header::HeaderValue::from_str(origin) {
+                headers_out.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+                // Private Network Access preflights (older Chrome) from a public site to loopback
+                headers_out.insert("access-control-allow-private-network", header::HeaderValue::from_static("true"));
+            }
+        }
+    }
+    response
+}
+
+/// A request from eyepiece-pc's own page: the session token in `x-eyepiece-token` (a header other
+/// sites cannot send without a preflight we never answer) and no cross-site origin.
+fn own_page(app: &App, headers: &HeaderMap) -> bool {
+    let token_ok = headers
+        .get("x-eyepiece-token")
+        .is_some_and(|token| token.len() == app.token.len() && bool::from(token.as_bytes().ct_eq(app.token.as_bytes())));
+    let site_ok = headers.get("sec-fetch-site").is_none_or(|value| value == "same-origin")
+        && (!headers.contains_key(header::ORIGIN) || allowed_header(headers, header::ORIGIN, &app.origins));
+    token_ok && site_ok
+}
+
+/// The web UI's Quit: stops the stream and the server, like Ctrl-C or the tray icon's Quit.
+async fn quit(State(app): State<App>, headers: HeaderMap) -> HttpResponse {
+    if !own_page(&app, &headers) {
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    }
+    app.shutdown.notify_one();
+    ([(header::CACHE_CONTROL, "no-store")], Json(serde_json::json!({ "quitting": true }))).into_response()
+}
+
+/// The web UI's "Browse" for the video file: the page and eyepiece-pc run on the same computer
+/// (loopback only), so eyepiece-pc shows the system's file dialog and returns the chosen path,
+/// which the page then sets as the `input` setting. A browser file input cannot do this: it never
+/// reveals the path, and uploading would copy a whole video. Needs the session token in
+/// `x-eyepiece-token` (a header other sites cannot send without a preflight we never answer).
+async fn pick_file(State(app): State<App>, headers: HeaderMap) -> HttpResponse {
+    if !own_page(&app, &headers) {
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    }
+    if app.picking.swap(true, Ordering::AcqRel) {
+        return (StatusCode::CONFLICT, Json(serde_json::json!({ "error": "a file dialog is already open" }))).into_response();
+    }
+    let result = tokio::task::spawn_blocking(crate::desktop::pick_video_file).await;
+    app.picking.store(false, Ordering::Release);
+    let body = match result {
+        Ok(Ok(path)) => serde_json::json!({ "path": path }),
+        Ok(Err(error)) => serde_json::json!({ "error": error }),
+        Err(_) => serde_json::json!({ "error": "file dialog failed" }),
+    };
+    ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
 }
 
 async fn upgrade(
@@ -468,11 +574,9 @@ fn broadcast_event(
     let _ = events.send(event);
 }
 
-pub(super) fn run(
-    args: Args,
-    overrides: HashSet<String>,
-) -> Result<(), String> {
+pub(super) fn run(startup: Startup, options: WebOptions) -> Result<(), WebError> {
     let port = configured_port()?;
+    let url = format!("http://127.0.0.1:{port}/");
     let mut random = [0u8; 32];
     getrandom::fill(&mut random).map_err(|e| format!("generate RPC token: {e}"))?;
     let token: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -488,26 +592,45 @@ pub(super) fn run(
             origins.insert(origin);
         }
         Err(std::env::VarError::NotPresent) => {}
-        Err(error) => return Err(format!("invalid EYEP_DEV_ORIGIN: {error}")),
+        Err(error) => return Err(format!("invalid EYEP_DEV_ORIGIN: {error}").into()),
     }
-    let site = web_dir()?;
+    let discovery_origins: HashSet<String> = std::env::var("EYEPIECE_DISCOVERY_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(|origin| origin.trim().trim_end_matches('/').to_string())
+        .filter(|origin| !origin.is_empty())
+        .collect();
+    let site = web_dir().map_err(WebError::NotBuilt)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("create RPC runtime: {e}"))?;
-    let listener = runtime
-        .block_on(tokio::net::TcpListener::bind(SocketAddr::from((
-            Ipv4Addr::LOCALHOST,
-            port,
-        ))))
-        .map_err(|e| format!("bind RPC server: {e}"))?;
+    let listener = match runtime.block_on(tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))) {
+        Ok(listener) => listener,
+        // most likely eyepiece-pc runs already (a second double-click): show that one
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && options.open_browser && !options.start => {
+            eprintln!("[eyepiece-pc] port {port} is in use, eyepiece-pc probably runs already: opening {url}");
+            crate::desktop::open_url(&url)?;
+            return Ok(());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            return Err(format!(
+                "port {port} is in use: another eyepiece-pc already serves {url} (stop it, use --no-web, or set EYEPIECE_PORT)"
+            )
+            .into());
+        }
+        Err(e) => return Err(format!("bind RPC server: {e}").into()),
+    };
+    if options.tray && !options.terminal {
+        crate::desktop::hide_console();
+    }
     let (input_tx, input_rx) = mpsc::channel();
     let (output_tx, output_rx) = mpsc::sync_channel::<Response>(32);
     let worker_input = input_tx.clone();
     let request_output = output_tx.clone();
     let (worker_finished, worker_done) = tokio::sync::oneshot::channel();
     let worker = thread::spawn(move || {
-        let result = run_worker(worker_input, input_rx, output_tx, Some((args, overrides)));
+        let result = run_worker(worker_input, input_rx, output_tx, Some(startup));
         let _ = worker_finished.send(result.as_ref().err().cloned());
         result
     });
@@ -519,51 +642,172 @@ pub(super) fn run(
     let (previews, _) = broadcast::channel(CLIENT_QUEUE);
     let event_tx = events.clone();
     let preview_tx = previews.clone();
+    let terminal = options.terminal;
     let output_thread = thread::spawn(move || {
+        let mut phase = String::new();
         for event in output_rx {
+            if terminal {
+                print_event(&event, &mut phase);
+            }
             broadcast_event(&event_tx, &preview_tx, event);
         }
     });
+    let shutdown = Arc::new(Notify::new());
+    if terminal && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        let input = input_tx.clone();
+        let shutdown = shutdown.clone();
+        // detached: it blocks on stdin, and the process exits after the server stops anyway
+        thread::spawn(move || read_keys(input, shutdown));
+    }
+    let tray_exit = Arc::new(AtomicBool::new(false));
+    #[cfg(feature = "tray")]
+    let tray = options.tray.then(|| (input_tx.clone(), events.subscribe(), shutdown.clone(), url.clone()));
     let app = App {
         token: token.into(),
         hosts: Arc::new(hosts),
         origins: Arc::new(origins),
+        discovery_origins: Arc::new(discovery_origins),
+        url: url.clone().into(),
         requests,
         events,
         previews,
         next_client: Arc::new(AtomicU64::new(1)),
+        picking: Arc::new(AtomicBool::new(false)),
+        shutdown: shutdown.clone(),
     };
     let router = Router::new()
         .route("/api/session", get(session))
         .route("/api/rpc", get(upgrade))
+        .route("/api/hello", get(hello).options(hello))
+        .route("/api/pick-file", get(pick_file))
+        .route("/api/quit", get(quit))
         .fallback_service(ServeDir::new(site))
         .layer(middleware::from_fn_with_state(app.clone(), protect))
         .with_state(app);
-    eprintln!("[eyepiece-pc] Web UI: http://127.0.0.1:{port}/");
-    let result = runtime.block_on(async {
-        tokio::select! {
-            result = axum::serve(listener, router).into_future() => {
-                result.map_err(|e| format!("RPC server: {e}"))
+    eprintln!("[eyepiece-pc] Web UI: {url}");
+    if let Ok(path) = super::settings_file() {
+        eprintln!("[eyepiece-pc] settings: {}", path.display());
+    }
+    if options.open_browser {
+        if let Err(e) = crate::desktop::open_url(&url) {
+            eprintln!("[eyepiece-pc] {e}");
+        }
+    }
+    let exit = tray_exit.clone();
+    let serve = move || -> Result<(), WebError> {
+        let result = runtime.block_on(async {
+            tokio::select! {
+                result = axum::serve(listener, router).into_future() => {
+                    result.map_err(|e| format!("RPC server: {e}"))
+                }
+                result = tokio::signal::ctrl_c() => {
+                    result.map_err(|e| format!("RPC shutdown signal: {e}"))
+                }
+                () = shutdown.notified() => Ok(()),
+                result = worker_done => {
+                    Err(result.ok().flatten().unwrap_or_else(|| "RPC worker stopped unexpectedly".into()))
+                }
             }
-            result = tokio::signal::ctrl_c() => {
-                result.map_err(|e| format!("RPC shutdown signal: {e}"))
-            }
-            result = worker_done => {
-                Err(result.ok().flatten().unwrap_or_else(|| "RPC worker stopped unexpectedly".into()))
+        });
+        exit.store(true, Ordering::Relaxed);
+        let _ = input_tx.send(Input::Closed);
+        drop(input_tx);
+        drop(runtime);
+        request_thread
+            .join()
+            .map_err(|_| "RPC request thread panicked".to_string())?;
+        worker.join().map_err(|_| "RPC worker panicked".to_string())??;
+        output_thread
+            .join()
+            .map_err(|_| "RPC output thread panicked".to_string())?;
+        Ok(result?)
+    };
+    // the icon runs on this thread (macOS: it must be the main thread), the server beside it
+    #[cfg(feature = "tray")]
+    if let Some((input, events, shutdown, url)) = tray {
+        let server = thread::spawn(serve);
+        run_tray(input, events, &shutdown, &url, &tray_exit);
+        return server.join().map_err(|_| WebError::Other("RPC server thread panicked".into()))?;
+    }
+    serve()
+}
+
+/// The tray icon until Quit (which stops the server) or the server's end. Without an icon (no
+/// tray host, an error) eyepiece-pc keeps running: the web UI has Quit too.
+#[cfg(feature = "tray")]
+fn run_tray(
+    input: mpsc::Sender<Input>,
+    mut events: broadcast::Receiver<Response>,
+    shutdown: &Notify,
+    url: &str,
+    exit: &AtomicBool,
+) {
+    let send = |command| {
+        let _ = input.send(Input::Request(Request { id: String::new(), command: Some(command) }));
+    };
+    send(request::Command::GetState(wire::GetState {}));
+    let act = |action| match action {
+        crate::tray::Action::Open => {
+            if let Err(e) = crate::desktop::open_url(url) {
+                crate::desktop::error_box(&e);
             }
         }
-    });
-    let _ = input_tx.send(Input::Closed);
-    drop(input_tx);
-    drop(runtime);
-    request_thread
-        .join()
-        .map_err(|_| "RPC request thread panicked")?;
-    worker.join().map_err(|_| "RPC worker panicked")??;
-    output_thread
-        .join()
-        .map_err(|_| "RPC output thread panicked")?;
-    result
+        crate::tray::Action::Start => send(request::Command::Start(wire::Start {})),
+        crate::tray::Action::Stop => send(request::Command::Stop(wire::Stop {})),
+        crate::tray::Action::Quit => shutdown.notify_one(),
+    };
+    let mut phase = || {
+        let mut latest = None;
+        loop {
+            match events.try_recv() {
+                Ok(Response { event: Some(response::Event::State(state)), .. }) => latest = Some(state.phase),
+                Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => {}
+                Err(_) => return latest,
+            }
+        }
+    };
+    if let Err(e) = crate::tray::run(&act, &mut phase, exit) {
+        eprintln!("[eyepiece-pc] no tray icon ({e}); quit from the web UI");
+    }
+}
+
+/// The terminal's view of a web UI run: log lines, errors and stream phase changes.
+fn print_event(event: &Response, phase: &mut String) {
+    match &event.event {
+        Some(response::Event::Log(log)) => eprintln!("[eyepiece-pc] {}", log.line),
+        Some(response::Event::Error(error)) => eprintln!("[eyepiece-pc] error: {}", error.message),
+        Some(response::Event::State(state)) if state.phase != *phase => {
+            if !phase.is_empty() || state.phase != "idle" {
+                eprintln!("[eyepiece-pc] stream {}", state.phase);
+            }
+            phase.clone_from(&state.phase);
+        }
+        _ => {}
+    }
+}
+
+/// r = recenter, i = keyframe, q = quit (each + Enter), as in the command-line mode.
+fn read_keys(input: mpsc::Sender<Input>, shutdown: Arc<Notify>) {
+    use std::io::BufRead;
+    for line in std::io::stdin().lock().lines() {
+        let Ok(line) = line else { break };
+        let command = match line.trim() {
+            "r" => request::Command::Recenter(wire::Recenter {}),
+            "i" => request::Command::ForceIdr(wire::ForceIdr {}),
+            "q" => {
+                shutdown.notify_one();
+                break;
+            }
+            "" => continue,
+            other => {
+                eprintln!("[eyepiece-pc] unknown key {other:?} (r/i/q)");
+                continue;
+            }
+        };
+        if input.send(Input::Request(Request { id: String::new(), command: Some(command) })).is_err() {
+            break;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -618,6 +862,32 @@ mod tests {
             preview_receiver.try_recv(),
             Err(broadcast::error::TryRecvError::Lagged(_))
         ));
+    }
+
+    #[test]
+    fn discovery_answers_only_tinkerglass_and_local_origins() {
+        let extra = HashSet::from(["https://example.org".to_string()]);
+        for allowed in [
+            "https://tinkerglass-org.github.io",
+            "https://pr-12.tinkerglass-prs.pages.dev",
+            "http://localhost:5173",
+            "http://127.0.0.1:4173",
+            "https://example.org",
+        ] {
+            assert!(discovery_origin_allowed(allowed, &extra), "{allowed}");
+        }
+        for denied in [
+            "https://evil.example",
+            "https://tinkerglass-prs.pages.dev",
+            "https://a.b.tinkerglass-prs.pages.dev",
+            "http://pr-12.tinkerglass-prs.pages.dev",
+            "https://pr-12.tinkerglass-prs.pages.dev:8443",
+            "https://pr-12.tinkerglass-prs.pages.dev.evil.example",
+            "http://localhost.evil.example",
+            "null",
+        ] {
+            assert!(!discovery_origin_allowed(denied, &extra), "{denied}");
+        }
     }
 
     #[test]

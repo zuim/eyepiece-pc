@@ -4,6 +4,7 @@ export function installMockWorker(schema) {
   const paneUpdates = [];
   const propertyUpdates = [];
   const previewUpdates = [];
+  const fileDialogs = [];
   let runningValues = {};
   let running = false;
   let failNextSetting = false;
@@ -13,6 +14,8 @@ export function installMockWorker(schema) {
     paneUpdates,
     propertyUpdates,
     previewUpdates,
+    fileDialogs,
+    quits: 0,
     failNextSetting() {
       failNextSetting = true;
     },
@@ -47,6 +50,16 @@ export function installMockWorker(schema) {
 
   const fetchOriginal = window.fetch;
   window.fetch = (input, init) => {
+    if (typeof input === "string" && input === "/api/quit") {
+      window.mockWorker.quits += 1;
+      return Promise.resolve(new Response(JSON.stringify({ quitting: true }), { headers: { "Content-Type": "application/json" } }));
+    }
+    if (typeof input === "string" && input === "/api/pick-file") {
+      fileDialogs.push(new Headers(init?.headers).get("x-eyepiece-token"));
+      return Promise.resolve(
+        new Response(JSON.stringify({ path: "/videos/clip.mkv" }), { headers: { "Content-Type": "application/json" } }),
+      );
+    }
     if (typeof input === "string" && input === "/api/session") {
       return Promise.resolve(
         new Response(JSON.stringify({ token: "mock", workerStatus: "connected" }), {

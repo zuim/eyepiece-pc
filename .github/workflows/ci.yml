@@ -10,7 +10,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # the web UI runs with every start, so the packages carry the built app (web/ next to the binary)
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npx -y pnpm@10 install --frozen-lockfile
+      - run: npx -y pnpm@10 check
+      - run: npx -y pnpm@10 test
+      - run: npx -y pnpm@10 build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-ui
+          path: web/build
+
   linux:
+    needs: web
     runs-on: ubuntu-latest
     # Debian testing ships FFmpeg 9 (libavcodec 63) like the dev machine; Ubuntu runners don't.
     # Not pinned to a snapshot: a testing transition can change the FFmpeg major.
@@ -29,6 +50,10 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-ui
+          path: web/build
       - name: Build
         run: cargo build --release --locked
       - name: Test
@@ -47,6 +72,7 @@ jobs:
           cp "$bin/eyepiece-pc" "dist/$name/"
           echo "eyepiece-pc $ver, features: $feat, built on debian:testing ($(dpkg-query -W -f='${Version}' libavcodec-dev))" > "dist/$name/BUILD-INFO.txt"
           cp README.md LICENSE "dist/$name/"
+          cp -r web/build "dist/$name/web"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
       - uses: actions/upload-artifact@v4
         with:
@@ -59,6 +85,7 @@ jobs:
   # libraries), so a minimal FFmpeg 9 is built from source and bundled. KMS capture does not work from an AppImage (no file
   # capabilities): that is what the tar.gz is for.
   appimage:
+    needs: web
     runs-on: ubuntu-24.04
     env:
       LINUXDEPLOY_VERSION: 1-alpha-20251107-1
@@ -87,6 +114,10 @@ jobs:
           curl -sSfL -o "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage" \
             "https://github.com/linuxdeploy/linuxdeploy/releases/download/$LINUXDEPLOY_VERSION/linuxdeploy-x86_64.AppImage"
           chmod +x "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage"
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-ui
+          path: web/build
       - name: Build AppImage
         shell: bash
         run: |
@@ -102,6 +133,7 @@ jobs:
           path: dist/*.AppImage
 
   windows:
+    needs: web
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +141,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # FFmpeg: eyepiece-av's build script fetches its pinned BtbN build into target\ffmpeg and
       # copies the DLLs next to the binaries, as on a developer's machine
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-ui
+          path: web/build
       - name: Build
         run: cargo build --release --locked
       - name: Test
@@ -122,6 +158,7 @@ jobs:
           New-Item -ItemType Directory -Force $d | Out-Null
           Copy-Item target\release\eyepiece-pc.exe, README.md, LICENSE $d
           Copy-Item target\release\*.dll $d
+          Copy-Item -Recurse web/build "$d/web"
           $ff = Get-ChildItem -Directory target\ffmpeg | Select-Object -First 1
           Copy-Item "$($ff.FullName)\LICENSE.txt" "$d\FFMPEG-LICENSE.txt" -ErrorAction SilentlyContinue
           Compress-Archive -Path $d -DestinationPath "dist\$name.zip"
@@ -131,6 +168,7 @@ jobs:
           path: dist/*.zip
 
   macos:
+    needs: web
     runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "15.0"
@@ -152,6 +190,10 @@ jobs:
         run: cargo build --release --locked
       - name: Test without screen capture permission
         run: cargo test --release --locked
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-ui
+          path: web/build
       - name: Package app and DMG
         shell: bash
         run: |

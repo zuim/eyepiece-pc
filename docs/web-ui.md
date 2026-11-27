@@ -1,22 +1,38 @@
 # Web UI
 
-`eyepiece-pc --web` serves a local browser interface (TypeScript and Svelte) for controlling the stream, with
-live settings, statistics, the head pose and an encoded preview. It talks to the same engine as the
-command line through the [RPC protocol](protocol/rpc.md).
+`eyepiece-pc` serves a local browser interface (TypeScript and Svelte) for controlling the stream, with
+live settings, statistics, the head pose and an encoded preview, whenever it runs (unless `--no-web`). It
+talks to the same engine as the command line through the [RPC protocol](protocol/rpc.md).
 
 ```sh
-target/release/eyepiece-pc --web         # then open http://127.0.0.1:4174/
+target/release/eyepiece-pc --open-web    # opens http://127.0.0.1:4174/ in the browser
 ```
 
-`EYEPIECE_PORT` changes the loopback port. CLI options given with `--web` override and persist the
-corresponding saved settings. The static app is read from `web/` next to the executable, else from
-`web/build` of the checkout the binary was built from, so it can be started from any directory;
-`EYEPIECE_WEB_DIR` points it elsewhere.
+`EYEPIECE_PORT` changes the loopback port. CLI options override and persist the corresponding saved
+settings ([usage](usage.md#web-ui-command-line-mode-and-tray) has the modes, the Windows tray icon and where
+the settings are kept). The static app is read from `web/` next to the executable, else from `web/build` of
+the checkout the binary was built from, so it can be started from any directory; `EYEPIECE_WEB_DIR` points it
+elsewhere. A development build without a built app falls back to the command-line mode with a note.
 
 ## Using it
 
 The tabs are **Overview**, **Statistics**, **Compare**, **Settings** and **Log**. Basic stream controls
-(start or stop, request a keyframe, restart) and the capture, connection and video selectors stay above the tabs.
+(start or stop, restart) and the capture, connection and video selectors stay above the tabs. **Quit** in the
+header asks for confirmation, then stops the stream and exits eyepiece-pc. With the
+*File* capture, **Browse…** opens the system's file dialog on the PC (eyepiece-pc shows it; the page only
+gets the path back) and the path field accepts a typed or pasted path. There is no keyframe button: the
+stream sends a keyframe every two seconds (`--gop`), on every connect and whenever the goggles or the
+preview need one, and `i` + Enter in the terminal still forces one.
+
+## Discovery from tinkerglass
+
+`GET /api/hello` answers `{"app": "eyepiece-pc", "version": …, "url": …}` with a CORS header for
+tinkerglass's web app (`https://tinkerglass-org.github.io`, the `*.tinkerglass-prs.pages.dev` previews and any
+`http://localhost` / `http://127.0.0.1` origin of its development server); `EYEPIECE_DISCOVERY_ORIGINS` adds
+comma-separated origins. It carries no token and no settings, so tinkerglass's PC Display panel can show
+whether eyepiece-pc runs instead of a plain link. Browsers with Local Network Access (Chrome) ask the user
+before a public site may reach `127.0.0.1`, so the panel should probe only after a click, or when that
+permission is already granted.
 
 - **Overview** shows the stream preview and the head pose, plus the graphical picture-in-picture editor and the
   transparency tuning. Drag the pane or its corner to move or resize it; pixel fields allow precise keyboard
@@ -28,7 +44,8 @@ The tabs are **Overview**, **Statistics**, **Compare**, **Settings** and **Log**
   charts.
 - **Compare** pins capture the running configuration and the mean telemetry over a chosen window.
 - **Settings** are grouped by function. The equivalent command line updates as settings change and can be
-  copied, or edited and applied; omitted options take their CLI defaults. *Reset* restores the web defaults and
+  copied, or edited and applied; omitted options take their CLI defaults. *Reset to Defaults* (also
+  *Reset Settings* beside the start button) asks for confirmation, restores the web defaults and
   can be undone for 20 seconds.
 - **Log** shows session and bridge log lines.
 

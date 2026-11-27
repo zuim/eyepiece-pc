@@ -6,12 +6,18 @@ app_version=${APP_VERSION:-$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' Carg
 minimum_os=${MACOSX_DEPLOYMENT_TARGET:-13.0}
 output_dir=${OUTPUT_DIR:-dist}
 binary_dir=${BINARY_DIR:-target/release}
+# the built web UI (cd web && pnpm build), served by every start
+web_dir=${WEB_DIR:-web/build}
 arch=$(uname -m)
 name="eyepiece-pc-${version}-macos-${arch}"
 staging="${output_dir}/${name}"
 app="${staging}/Eyepiece.app"
 dmg="${output_dir}/${name}.dmg"
 
+if [[ ! -f "$web_dir/index.html" ]]; then
+    echo "The web UI is not built: run pnpm build in web/ (or set WEB_DIR)" >&2
+    exit 1
+fi
 if [[ -e "$staging" || -e "$dmg" ]]; then
     echo "Refusing to overwrite existing package: $staging or $dmg" >&2
     exit 1
@@ -20,6 +26,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks" "$app/Contents/Resourc
 cp packaging/macos/Info.plist "$app/Contents/Info.plist"
 cp "$binary_dir/eyepiece-pc" "$app/Contents/MacOS/"
 cp README.md LICENSE "$app/Contents/Resources/"
+cp -R "$web_dir" "$app/Contents/Resources/web"
 if [[ ${INCLUDE_HOMEBREW_METADATA:-0} == 1 ]]; then
     dependencies=$(brew deps --installed ffmpeg)
     formulae=(ffmpeg)

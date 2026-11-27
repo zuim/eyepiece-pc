@@ -21,6 +21,7 @@
     {"name":"cursor","group":"Source","description":"Capture cursor","type":"boolean","default":true},
     {"name":"display_id","group":"Source","description":"macOS display ID","type":"optional_integer","default":null,"min":0,"max":4294967295},
     {"name":"dxgi","group":"Source","description":"DXGI adapter and output","type":"string","default":"0,0"},
+    {"name":"dxgi_cursor","group":"Source","description":"Draw mouse pointer","type":"choice","default":"auto","choices":["auto","on","off"]},
     {"name":"kms_simulate","group":"Source","description":"KMS simulation","type":"boolean","default":false},
     {"name":"fps","group":"Video","description":"Frames per second","type":"integer","default":100,"min":1,"max":240},
     {"name":"codec","group":"Video","description":"Codec","type":"choice","default":"h264","platform_defaults":{"macos":"hevc"},"choices":["h264","hevc"]},

@@ -1,7 +1,28 @@
 # Command-line usage
 
-`eyepiece-pc` is a command-line program; `eyepiece-pc --web` adds the [web UI](web-ui.md) on top of the
-same engine. Run `eyepiece-pc --help` for every option.
+`eyepiece-pc` is a command-line program with the [web UI](web-ui.md) running alongside on the same engine.
+Run `eyepiece-pc --help` for every option.
+
+## Web UI, command-line mode and tray
+
+- `eyepiece-pc` streams at once and serves the web UI at http://127.0.0.1:4174/; `--open-web` (`--open`)
+  also opens it in the browser. The terminal shows log lines and stream state; statistics are in the web UI.
+  Options given on the command line are saved as web UI settings, so the next start uses them.
+- `--no-web` is the plain command-line mode: only the given options, nothing saved, the statistics line on
+  stderr, exit when the stream ends. One-run options (`--list`, `--no-connect`, `--dump`, `--frames`,
+  `--duration`, `--preview`, `--print-pose`) select it by themselves, so a benchmark never changes the saved
+  settings; `--web` keeps the web UI with them.
+- A desktop start behaves the same on every platform: a double-click on `eyepiece-pc.exe` (Windows, the
+  console window closes), the app from Finder or the Dock (macOS), or the AppImage from a file manager or the
+  desktop entry (Linux, which passes `--desktop`). It opens the web UI and shows a tray icon (notification
+  area; menu bar on macOS; on Linux a StatusNotifierItem, shown by KDE and most desktops, by GNOME with the
+  AppIndicator extension): open the web UI, start or stop the stream, quit. It does not start a stream by
+  itself, but resumes one that was running when it was last closed. A second start opens the running
+  instance. Without a tray host eyepiece-pc runs on; the web UI's **Quit** (also there in every mode) ends
+  it. `--tray` shows the icon from a terminal too; builds without the `tray` feature have none.
+- Settings live in `%APPDATA%\eyepiece\config\eyepiece-rpc.json` on Windows, `~/.config/eyepiece/` on Linux
+  (`$XDG_CONFIG_HOME`) and `~/Library/Application Support/eyepiece/` on macOS; `EYEPIECE_CONFIG_DIR`
+  points elsewhere (portable installs, tests). The path is printed at start.
 
 ## Basic use
 
@@ -35,9 +56,15 @@ By default the stream is 1920x1080, the goggles' panel size: they have no displa
 Every source is scaled to fit on the PC and letterboxed with black bars (`--no-letterbox`
 stretches instead). A [picture-in-picture pane](pip-and-transparency.md) is encoded at its own size.
 
-Stdin: `r` recenter, `i` force an IDR, `q` quit (each + Enter). Ctrl-C quits cleanly
+Mouse pointer (Windows, DXGI): the captured frames carry no hardware cursor, so eyepiece-pc draws it from
+the pointer position and shape Desktop Duplication reports (monochrome, colour and masked-colour shapes).
+`--dxgi-cursor auto` (default) draws it only when the image does not already show it (a software cursor),
+`on` always, `off` never. `cargo run -p eyepiece-capture --example dxgi-cursor -- auto 5 [output]` shows
+which case a machine is in.
+
+Stdin (both modes): `r` recenter, `i` force an IDR, `q` quit (each + Enter). Ctrl-C quits cleanly
 (twice: hard). `--dump out.h264` also writes the exact Annex-B stream; `--no-connect
---duration 10` encodes without a bridge. See `eyepiece-pc --help` for all
+--duration 10` encodes without a bridge (command-line mode). See `eyepiece-pc --help` for all
 options (`--fps` default 100 = goggles panel, `--bitrate` default 20M, `--sync
 vblank|poll|timer`, `--reconnect`, `--host` for a directly reachable bridge, …).
 

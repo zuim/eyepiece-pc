@@ -41,6 +41,35 @@ export async function previewCommand(enabled: boolean, keyframesOnly = false): P
   };
 }
 
+/**
+ * Shows eyepiece-pc's file dialog on this computer (the web UI only runs on loopback, so the PC
+ * is the one the user sits at) and resolves with the chosen path, or null when cancelled. A browser
+ * file input would never reveal the path, and eyepiece-pc opens the file itself.
+ */
+export async function pickVideoFile(fetcher: typeof fetch = fetch): Promise<string | null> {
+  const session = await fetcher("/api/session", { cache: "no-store" });
+  if (!session.ok) throw new Error(`Backend session request failed (${session.status})`);
+  const { token } = (await session.json()) as { token: string };
+  const response = await fetcher("/api/pick-file", { cache: "no-store", headers: { "x-eyepiece-token": token } });
+  const body = (await response.json().catch(() => ({}))) as { path?: string | null; error?: string };
+  if (!response.ok || body.error) throw new Error(body.error ?? `File dialog request failed (${response.status})`);
+  return body.path ?? null;
+}
+
+/** Asks eyepiece-pc to quit: the stream stops and the web UI server exits. */
+export async function quitApp(fetcher: typeof fetch = fetch): Promise<void> {
+  const session = await fetcher("/api/session", { cache: "no-store" });
+  if (!session.ok) throw new Error(`Backend session request failed (${session.status})`);
+  const { token } = (await session.json()) as { token: string };
+  try {
+    const response = await fetcher("/api/quit", { cache: "no-store", headers: { "x-eyepiece-token": token } });
+    if (response.status === 403) throw new Error("Quit was refused");
+  } catch (error) {
+    // the server may close the connection before it answers: that is a successful quit
+    if (error instanceof Error && error.message === "Quit was refused") throw error;
+  }
+}
+
 export function metricValues(metrics: eyepiece.rpc.v1.IMetrics): Record<string, number> {
   const values: Record<string, number> = {};
   for (const [name, value] of Object.entries(

@@ -2,6 +2,7 @@
   import { onMount, untrack } from "svelte";
   import type { eyepiece } from "$lib/generated/eyepiece-rpc.js";
   import ComparePanel from "$lib/components/ComparePanel.svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { errorHelp } from "$lib/error-help";
   import LogPanel from "$lib/components/LogPanel.svelte";
   import OverviewPanel from "$lib/components/OverviewPanel.svelte";
@@ -22,7 +23,7 @@
   import { OptimisticSettings } from "$lib/optimistic-settings";
   import { PaneDragThrottle } from "$lib/pane-drag-throttle";
   import type { Pose } from "$lib/pose-model";
-  import { metricValues, previewCommand, propertyValue, wireValue, type RpcCommand, type RpcResponse } from "$lib/rpc";
+  import { metricValues, pickVideoFile, quitApp, previewCommand, propertyValue, wireValue, type RpcCommand, type RpcResponse } from "$lib/rpc";
   import { appendSample, summarizeWindow, type MetricSample } from "$lib/telemetry";
   import {
     defaultPreferences,
@@ -54,6 +55,7 @@
   let previewSubscribing = $state(false);
   let kmsOutputs = $state.raw<string[]>([]);
   let listingKmsOutputs = $state(false);
+  let pickingFile = $state(false);
   let pose = $state.raw<Pose | null>(null);
   let latest = $state.raw<Metrics>({});
   let samples = $state.raw<MetricSample[]>([]);
@@ -62,6 +64,9 @@
   let statusMessage = $state("");
   const statusHelp = $derived(errorHelp(statusMessage));
   let resetUndo = $state.raw<Record<string, unknown>>();
+  let confirmingReset = $state(false);
+  let confirmingQuit = $state(false);
+  let quit = $state(false);
   let preferencesReady = $state(false);
   // Not rendered, so plain variables.
   let subscribedPreviewOn = false;
@@ -169,6 +174,30 @@
       await send({ listKmsOutputs: {} });
     } finally {
       listingKmsOutputs = false;
+    }
+  }
+
+  async function quitEyepiece() {
+    try {
+      await quitApp();
+      quit = true;
+      connection.dispose();
+    } catch (error) {
+      statusMessage = `Cannot quit: ${errorMessage(error)}`;
+    }
+  }
+
+  async function browseVideoFile() {
+    const setting = findSetting(schema, "input");
+    if (!setting || pickingFile) return;
+    pickingFile = true;
+    try {
+      const path = await pickVideoFile();
+      if (path) await changeSetting(setting, path);
+    } catch (error) {
+      statusMessage = `Cannot choose a file: ${errorMessage(error)}`;
+    } finally {
+      pickingFile = false;
     }
   }
 
@@ -350,7 +379,10 @@
     <a class="brand" href="/"
       ><span class="brand-mark">E</span><span>eyepiece<span class="brand-sub"> / PC CONTROL</span></span></a
     >
-    <StatusBar {workerStatus} {phase} {connected} {desiredRunning} noConnect={Boolean(values.no_connect)} />
+    <div class="header-actions">
+      <StatusBar {workerStatus} {phase} {connected} {desiredRunning} noConnect={Boolean(values.no_connect)} />
+      <button class="secondary quit-button" disabled={!workerConnected} onclick={() => (confirmingQuit = true)}>Quit</button>
+    </div>
   </header>
 
   {#if statusMessage}<div class="alert" role="alert">
@@ -361,6 +393,21 @@
       </div>
       <button aria-label="Dismiss" onclick={() => (statusMessage = "")}>×</button>
     </div>{/if}
+  <ConfirmDialog
+    bind:open={confirmingReset}
+    title="Reset all settings?"
+    message="Every setting returns to its default. Settings that cannot change live apply when the stream restarts. You can undo this for 20 seconds."
+    confirmLabel="Reset Settings"
+    onConfirm={() => void resetSettings()}
+  />
+  <ConfirmDialog
+    bind:open={confirmingQuit}
+    title="Quit eyepiece-pc?"
+    message="The stream stops and eyepiece-pc exits; this page stops working until you start it again."
+    confirmLabel="Quit"
+    onConfirm={() => void quitEyepiece()}
+  />
+  {#if quit}<div class="notice" role="status">eyepiece-pc has quit. You can close this tab.</div>{/if}
   {#if resetUndo}<div class="notice">
       Settings reset. <button class="secondary" onclick={undoReset}>Undo</button>
     </div>{/if}
@@ -373,9 +420,12 @@
     {workerConnected}
     {kmsOutputs}
     {listingKmsOutputs}
+    {pickingFile}
     {send}
     {changeSetting}
     {discoverKmsOutputs}
+    {browseVideoFile}
+    requestReset={() => (confirmingReset = true)}
   />
 
   <nav class="tabs" aria-label="Workspace Sections">
@@ -418,7 +468,9 @@
       {commandLine}
       {applyCommand}
       {copyText}
-      {resetSettings}
+      resetSettings={async () => {
+        confirmingReset = true;
+      }}
       {changeSetting}
       {changeAlphaSettings}
       changePaneDuringDrag={(value, mode) => paneDrag.update(value, mode)}
@@ -432,6 +484,17 @@
 </main>
 
 <style>
+  .header-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: 0;
+  }
+  .quit-button {
+    padding: 6px 12px;
+  }
   .shell {
     max-width: 1500px;
     margin: auto;

@@ -456,3 +456,42 @@ for (const viewport of [
     }
   });
 }
+
+test("the video file is chosen with eyepiece-pc's file dialog", async ({ page }) => {
+  await page.locator(".capture-group select").first().selectOption("file");
+  await page.getByRole("button", { name: "Browse…" }).click();
+  await expect(page.getByRole("textbox", { name: "Video file", exact: true })).toHaveValue("/videos/clip.mkv");
+  expect(await page.evaluate(() => window.mockWorker.fileDialogs)).toEqual(["mock"]);
+  expect(await page.evaluate(() => window.mockWorker.propertyUpdates.some((update) => update.name === "input"))).toBe(true);
+  await expect(page.getByRole("button", { name: /Keyframe/ })).toHaveCount(0);
+});
+
+test("reset asks first, then restores the defaults with undo", async ({ page }) => {
+  const bitrate = page.getByLabel("Bitrate").first();
+  await bitrate.selectOption("40M");
+  await expect(bitrate).toHaveValue("40M");
+  await page.getByRole("button", { name: "Reset Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Reset all settings?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(bitrate).toHaveValue("40M");
+  await page.getByRole("button", { name: "Reset Settings" }).click();
+  await dialog.getByRole("button", { name: "Reset Settings" }).click();
+  await expect(bitrate).toHaveValue("20M");
+  await expect(page.getByText("Settings reset.")).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Reset to Defaults" }).click();
+  await expect(dialog).toBeVisible();
+});
+
+test("quit asks first, then stops eyepiece-pc", async ({ page }) => {
+  await page.getByRole("button", { name: "Quit", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Quit eyepiece-pc?" });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await page.evaluate(() => window.mockWorker.quits)).toBe(0);
+  await page.getByRole("button", { name: "Quit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Quit" }).click();
+  await expect(page.getByText("eyepiece-pc has quit.")).toBeVisible();
+  expect(await page.evaluate(() => window.mockWorker.quits)).toBe(1);
+});

@@ -35,7 +35,7 @@ Install once: [rustup](https://rustup.rs) (MSVC toolchain, with Visual Studio 20
 ```pwsh
 cargo build --release                    # → target\release\eyepiece-pc.exe, FFmpeg DLLs next to it
 cd web; npx -y pnpm@10 install --frozen-lockfile; npx -y pnpm@10 build; cd ..   # → web\build
-target\release\eyepiece-pc.exe --web     # then open http://127.0.0.1:4174/
+target\release\eyepiece-pc.exe --open-web   # opens http://127.0.0.1:4174/
 ```
 
 FFmpeg needs no setup: the first build downloads the pinned BtbN FFmpeg 9 shared build (about 85 MB,
