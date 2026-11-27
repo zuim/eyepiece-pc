@@ -456,3 +456,12 @@ for (const viewport of [
     }
   });
 }
+
+test("the video file is chosen with eyepiece-pc's file dialog", async ({ page }) => {
+  await page.locator(".capture-group select").first().selectOption("file");
+  await page.getByRole("button", { name: "Browse…" }).click();
+  await expect(page.getByRole("textbox", { name: "Video file", exact: true })).toHaveValue("/videos/clip.mkv");
+  expect(await page.evaluate(() => window.mockWorker.fileDialogs)).toEqual(["mock"]);
+  expect(await page.evaluate(() => window.mockWorker.propertyUpdates.some((update) => update.name === "input"))).toBe(true);
+  await expect(page.getByRole("button", { name: /Keyframe/ })).toHaveCount(0);
+});
