@@ -2,6 +2,7 @@
   import { onMount, untrack } from "svelte";
   import type { eyepiece } from "$lib/generated/eyepiece-rpc.js";
   import ComparePanel from "$lib/components/ComparePanel.svelte";
+  import { errorHelp } from "$lib/error-help";
   import LogPanel from "$lib/components/LogPanel.svelte";
   import OverviewPanel from "$lib/components/OverviewPanel.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
@@ -59,6 +60,7 @@
   let logs = $state.raw<string[]>([]);
   let activeTab = $state("Overview");
   let statusMessage = $state("");
+  const statusHelp = $derived(errorHelp(statusMessage));
   let resetUndo = $state.raw<Record<string, unknown>>();
   let preferencesReady = $state(false);
   // Not rendered, so plain variables.
@@ -352,7 +354,12 @@
   </header>
 
   {#if statusMessage}<div class="alert" role="alert">
-      {statusMessage}<button aria-label="Dismiss" onclick={() => (statusMessage = "")}>×</button>
+      <div class="alert-body">
+        <p>{statusMessage}</p>
+        {#if statusHelp}<p class="alert-lead">{statusHelp.lead}</p>
+          <ul>{#each statusHelp.steps as step}<li>{step}</li>{/each}</ul>{/if}
+      </div>
+      <button aria-label="Dismiss" onclick={() => (statusMessage = "")}>×</button>
     </div>{/if}
   {#if resetUndo}<div class="notice">
       Settings reset. <button class="secondary" onclick={undoReset}>Undo</button>
@@ -476,7 +483,20 @@
     background: #281a18;
     color: #ffc2ad;
   }
+  .alert-body p {
+    margin: 0;
+  }
+  .alert-body .alert-lead {
+    margin-top: 6px;
+    color: #f3d6cb;
+  }
+  .alert-body ul {
+    margin: 2px 0 0;
+    padding-left: 20px;
+    color: #f3d6cb;
+  }
   .alert button {
+    align-self: flex-start;
     border: 0;
     background: none;
     color: inherit;
