@@ -1,13 +1,9 @@
 {
   "version": 1,
   "settings": [
-    {"name":"adb","group":"Transport","description":"adb executable","type":"string","default":"adb"},
-    {"name":"serial","group":"Transport","description":"adb device serial","type":"optional_string","default":null},
-    {"name":"port","group":"Transport","description":"Bridge TCP port","type":"integer","default":42420,"min":1,"max":65535},
-    {"name":"host","group":"Transport","description":"Bridge host","type":"string","default":"127.0.0.1"},
-    {"name":"transport","group":"Transport","description":"Connection","type":"choice","default":"auto","choices":["auto","usb-bulk","adb"]},
-    {"name":"no_forward","group":"Transport","description":"Do not create adb forward","type":"boolean","default":false},
-    {"name":"no_deploy","group":"Transport","description":"Use running bridge","type":"boolean","default":false},
+    {"name":"serial","group":"Transport","description":"Goggles USB serial number","type":"optional_string","default":null},
+    {"name":"host","group":"Transport","description":"Test bridge over TCP (HOST:PORT)","type":"optional_string","default":null},
+    {"name":"no_launch","group":"Transport","description":"Use running bridge","type":"boolean","default":false},
     {"name":"bridge_args","group":"Transport","description":"Bridge arguments","type":"string","default":""},
     {"name":"stop_bridge","group":"Transport","description":"Stop bridge on quit","type":"boolean","default":false},
     {"name":"reconnect","group":"Transport","description":"Reconnect after disconnect","type":"boolean","default":false},

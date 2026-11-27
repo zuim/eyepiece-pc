@@ -49,8 +49,7 @@
   };
 
   const captureSetting = $derived(findSetting(schema, "source"));
-  const bridgeSetting = $derived(findSetting(schema, "no_deploy"));
-  const transportSetting = $derived(findSetting(schema, "transport"));
+  const bridgeSetting = $derived(findSetting(schema, "no_launch"));
   const source = $derived(currentSetting("source", values));
   const sourceField = $derived(sourceFields[source] ?? "");
   const sourceParameter = $derived(findSetting(schema, sourceField));
@@ -148,29 +147,16 @@
           {/if}
         </fieldset>
       {/if}
-      {#if bridgeSetting?.visible !== false || transportSetting?.visible !== false}
+      {#if bridgeSetting && bridgeSetting.visible !== false}
         <fieldset class="control-group connection-group">
           <legend>Connection</legend>
-          {#if bridgeSetting && bridgeSetting.visible !== false}
-            <label
-              ><span>Bridge</span><select
-                value={values.no_deploy ? "running" : "start"}
-                onchange={(event) => changeSetting(bridgeSetting, event.currentTarget.value === "running")}
-                ><option value="start">Start Bridge</option><option value="running">Use Running Bridge</option></select
-              ></label
-            >
-          {/if}
-          {#if transportSetting && transportSetting.visible !== false}
-            <label
-              ><span>Connection</span><ChoiceSelect
-                value={selectedChoice(transportSetting, values)}
-                choices={transportSetting.choices ?? []}
-                label={(choice) => choiceLabel("transport", choice)}
-                placeholder="No detected transport"
-                onChange={(value) => changeSetting(transportSetting, value)}
-              /></label
-            >
-          {/if}
+          <label
+            ><span>Bridge</span><select
+              value={values.no_launch ? "running" : "start"}
+              onchange={(event) => changeSetting(bridgeSetting, event.currentTarget.value === "running")}
+              ><option value="start">Start Bridge</option><option value="running">Use Running Bridge</option></select
+            ></label
+          >
         </fieldset>
       {/if}
       {#if showVideo}

@@ -44,11 +44,6 @@ export const encoderLabels: Record<string, string> = {
   software: "Software",
 };
 export const choiceLabels: Record<string, Record<string, string>> = {
-  transport: {
-    auto: "Automatic",
-    "usb-bulk": "USB Bulk",
-    adb: "Android Debug Bridge (ADB)",
-  },
   source: {
     kms: "Linux KMS",
     pipewire: "PipeWire",
@@ -86,8 +81,8 @@ export const choiceLabels: Record<string, Record<string, string>> = {
   },
 };
 export const settingGroups = [
-  ["Connection", ["transport", "host", "port", "serial", "adb", "no_forward", "no_connect", "reconnect"]],
-  ["Bridge", ["no_deploy", "bridge_args", "stop_bridge"]],
+  ["Connection", ["serial", "host", "no_connect", "reconnect"]],
+  ["Bridge", ["no_launch", "bridge_args", "stop_bridge"]],
   [
     "Capture",
     [
@@ -244,7 +239,6 @@ export function encoderLabel(encoder: string): string {
 
 export function titleCase(label: string): string {
   return label.replace(/\b[a-zA-Z][a-zA-Z0-9]*\b/g, (word, index: number) => {
-    if (word === "adb") return "ADB";
     if (word === "opentrack" || word === "macOS" || word === "ffplay") return word;
     if (index > 0 && ["and", "in", "of", "on", "per", "to"].includes(word)) return word;
     return word[0].toUpperCase() + word.slice(1);
