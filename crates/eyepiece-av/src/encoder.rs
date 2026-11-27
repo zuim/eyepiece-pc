@@ -125,8 +125,11 @@ pub fn probe(name: &str, vaapi_device: &str) -> bool {
         return false;
     }
     match family(name) {
+        // VAAPI is Linux's; FFmpeg's Windows builds carry a VAAPI-over-D3D layer that only fails
+        // (and logs) on the usual drivers
         Family::Vaapi => {
-            crate::hw::hwdevice(AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI, Some(vaapi_device)).is_ok()
+            cfg!(target_os = "linux")
+                && crate::hw::hwdevice(AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI, Some(vaapi_device)).is_ok()
         }
         _ => unsafe {
             let c = avcodec_find_encoder_by_name(cstr(name).as_ptr());
@@ -161,10 +164,12 @@ pub fn probe(name: &str, vaapi_device: &str) -> bool {
 
 #[cfg(target_os = "macos")]
 const AUTO_ENCODERS: &[&str] = &["videotoolbox", "software"];
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 const AUTO_ENCODERS: &[&str] = &["nvenc", "vaapi", "amf", "qsv", "software"];
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const AUTO_ENCODERS: &[&str] = &["nvenc", "amf", "qsv", "software"];
 
-/// "auto": VideoToolbox on macOS; NVENC, VAAPI, AMF, QSV elsewhere; then software.
+/// "auto": VideoToolbox on macOS; NVENC, VAAPI (Linux), AMF, QSV elsewhere; then software.
 pub fn resolve(alias: &str, codec: Codec, vaapi_device: &str) -> Result<String, String> {
     if alias != "auto" {
         let n = encoder_name(alias, codec);

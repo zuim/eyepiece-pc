@@ -152,7 +152,7 @@ pub struct Args {
     /// color-key softness within the similarity radius, 0..1
     #[arg(long, default_value_t = 0.0)]
     pub key_blend: f32,
-    /// auto (VideoToolbox on macOS, else nvenc→vaapi→amf→qsv; then software) | videotoolbox | nvenc | vaapi | amf | qsv | x264 (h264 only) | x265 (hevc only) | FFmpeg name
+    /// auto (VideoToolbox on macOS, else nvenc→vaapi (Linux)→amf→qsv; then software) | videotoolbox | nvenc | vaapi (Linux) | amf | qsv | x264 (h264 only) | x265 (hevc only) | FFmpeg name
     #[arg(long, default_value = "auto")]
     pub encoder: String,
     /// VAAPI render node (GPU conversion, VAAPI encode)
