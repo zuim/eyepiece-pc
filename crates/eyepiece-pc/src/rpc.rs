@@ -16,7 +16,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use eyepiece_link::proto::wire;
 mod preview;
@@ -156,7 +156,6 @@ struct Setting {
 #[derive(Default)]
 struct CapabilityCache {
     encoders: HashMap<(String, String), Vec<String>>,
-    transports: Option<(Instant, String, Option<String>, Vec<String>)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -277,46 +276,6 @@ fn encoder_choices(
     Ok(choices)
 }
 
-fn adb_device_connected(output: &str, serial: Option<&str>) -> bool {
-    output.lines().any(|line| {
-        let mut fields = line.split_whitespace();
-        let Some(device) = fields.next() else {
-            return false;
-        };
-        fields.next() == Some("device") && serial.is_none_or(|wanted| wanted == device)
-    })
-}
-
-fn detected_transports(args: &Args, cache: &mut CapabilityCache) -> Vec<String> {
-    if let Some((at, adb, serial, choices)) = &cache.transports {
-        if at.elapsed() < Duration::from_secs(3) && adb == &args.adb && serial == &args.serial {
-            return choices.clone();
-        }
-    }
-
-    let usb_bulk = eyepiece_link::usb::probe(args.serial.as_deref()).is_ok();
-    let adb_ready = eyepiece_link::adb::Adb::new(args.adb.clone(), None)
-        .run(&["devices"], false)
-        .is_ok_and(|output| adb_device_connected(&output, args.serial.as_deref()));
-    let mut choices = Vec::new();
-    if usb_bulk || adb_ready || args.host != "127.0.0.1" {
-        choices.push("auto".into());
-    }
-    if usb_bulk {
-        choices.push("usb-bulk".into());
-    }
-    if adb_ready {
-        choices.push("adb".into());
-    }
-    cache.transports = Some((
-        Instant::now(),
-        args.adb.clone(),
-        args.serial.clone(),
-        choices.clone(),
-    ));
-    choices
-}
-
 fn selected_encoder_family(
     args: &Args,
     aliases: &[String],
@@ -345,11 +304,9 @@ fn setting_visible(
 
     match name {
         "no_connect" => true,
-        "bridge_args" | "stop_bridge" => !args.no_connect && !args.no_deploy,
-        "host" | "port" => !args.no_connect && args.transport == "auto",
-        "transport" | "serial" | "adb" | "no_forward" | "no_deploy" | "reconnect" => {
-            !args.no_connect
-        }
+        "bridge_args" => !args.no_connect && !args.no_launch && args.host.is_none(),
+        "serial" | "no_launch" => !args.no_connect && args.host.is_none(),
+        "host" | "reconnect" | "stop_bridge" => !args.no_connect,
         "source" | "fps" | "cursor" | "sync" | "output" | "kms_device" | "kms_plane"
         | "kms_simulate" | "display" | "region" | "input" | "lavfi" | "restore_token"
         | "display_id" | "dxgi" => {
@@ -428,7 +385,6 @@ fn state_schema(base: &Schema, args: &Args, cache: &mut CapabilityCache) -> Resu
             codecs.push(codec.to_string());
         }
     }
-    let transports = detected_transports(args, cache);
     let mut schema = base.clone();
     for setting in &mut schema.settings {
         match setting.name.as_str() {
@@ -439,7 +395,6 @@ fn state_schema(base: &Schema, args: &Args, cache: &mut CapabilityCache) -> Resu
             }
             "encoder" => setting.choices = Some(encoder_options.clone()),
             "codec" => setting.choices = Some(codecs.clone()),
-            "transport" => setting.choices = Some(transports.clone()),
             _ => {}
         }
         if !setting_visible(&setting.name, args, &encoder_options, family) {
@@ -468,8 +423,10 @@ fn load(path: &Path, schema: &Schema) -> Result<Saved, String> {
         Ok(bytes) => {
             let mut saved: Saved = serde_json::from_slice(&bytes)
                 .map_err(|e| format!("cannot parse {}: {e}", path.display()))?;
-            if saved.args.transport == "usb-net" {
-                saved.args.transport = "auto".into();
+            // settings of the ADB era: "host" was the adb-forward address ("127.0.0.1", with
+            // the port apart); USB needs none
+            if saved.args.host.as_deref().is_some_and(|h| !h.contains(':')) {
+                saved.args.host = None;
             }
             validate_args(&saved.args, schema)?;
             Ok(saved)
@@ -1489,15 +1446,6 @@ mod tests {
     }
 
     #[test]
-    fn detected_adb_transport_requires_online_matching_device() {
-        let output = "List of devices attached\nserial-1\tdevice product:foo\nserial-2\toffline\n";
-        assert!(adb_device_connected(output, None));
-        assert!(adb_device_connected(output, Some("serial-1")));
-        assert!(!adb_device_connected(output, Some("serial-2")));
-        assert!(!adb_device_connected(output, Some("missing")));
-    }
-
-    #[test]
     fn related_settings_follow_source_and_encoder() {
         let mut args = Args::default();
         args.source = "file".into();
@@ -1520,32 +1468,28 @@ mod tests {
         assert!(setting_visible("no_connect", &args, &[], family));
 
         args.no_video = false;
-        args.no_deploy = true;
+        args.no_launch = true;
         assert!(!setting_visible("bridge_args", &args, &[], family));
-        assert!(!setting_visible("stop_bridge", &args, &[], family));
+        assert!(setting_visible("stop_bridge", &args, &[], family));
         args.no_connect = true;
-        assert!(!setting_visible("transport", &args, &[], family));
-        assert!(!setting_visible("no_deploy", &args, &[], family));
+        assert!(!setting_visible("no_launch", &args, &[], family));
+        assert!(!setting_visible("stop_bridge", &args, &[], family));
         assert!(setting_visible("no_connect", &args, &[], family));
     }
 
     #[test]
-    fn host_and_port_follow_data_link() {
+    fn a_tcp_test_bridge_hides_the_usb_settings() {
         let mut args = Args::default();
-        for transport in ["auto"] {
-            args.transport = transport.into();
-            assert!(setting_visible("host", &args, &[], None));
-            assert!(setting_visible("port", &args, &[], None));
+        for name in ["host", "serial", "no_launch", "bridge_args"] {
+            assert!(setting_visible(name, &args, &[], None), "{name}");
         }
-        for transport in ["usb-bulk", "adb"] {
-            args.transport = transport.into();
-            assert!(!setting_visible("host", &args, &[], None));
-            assert!(!setting_visible("port", &args, &[], None));
+        args.host = Some("127.0.0.1:42420".into());
+        assert!(setting_visible("host", &args, &[], None));
+        for name in ["serial", "no_launch", "bridge_args"] {
+            assert!(!setting_visible(name, &args, &[], None), "{name}");
         }
-        args.transport = "auto".into();
         args.no_connect = true;
         assert!(!setting_visible("host", &args, &[], None));
-        assert!(!setting_visible("port", &args, &[], None));
     }
 
     #[test]
@@ -1633,7 +1577,7 @@ mod tests {
         };
         assert!(apply_properties(&args, &schema, vec![invalid]).is_err());
         let invalid_choice = Property {
-            name: "transport".into(),
+            name: "scale_mode".into(),
             value: Some(Value {
                 kind: Some(value::Kind::Text("invalid".into())),
             }),
@@ -1863,9 +1807,17 @@ mod tests {
         assert!(!restored.args.cursor);
         assert!(!restored.args.head_tracking);
         assert!(restored.desired_running);
-        saved.args.transport = "usb-net".into();
-        std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
-        assert_eq!(load(&path, &schema).unwrap().args.transport, "auto");
+        // an ADB-era file: its adb fields are ignored and its forward address dropped
+        let mut old = serde_json::to_value(&saved).unwrap();
+        old["args"]["host"] = "127.0.0.1".into();
+        old["args"]["adb"] = "adb".into();
+        old["args"]["transport"] = "auto".into();
+        old["args"].as_object_mut().unwrap().remove("no_launch");
+        old["args"]["no_deploy"] = true.into();
+        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let migrated = load(&path, &schema).unwrap();
+        assert_eq!(migrated.args.host, None);
+        assert!(migrated.args.no_launch, "no_deploy is no_launch now");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
