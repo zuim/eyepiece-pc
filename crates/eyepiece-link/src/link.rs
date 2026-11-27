@@ -94,7 +94,11 @@ impl Shared {
 pub struct Link {
     sock: Mutex<Option<Writer>>,
     raw: Option<TcpStream>,
-    _usb: Option<(Device, Interface)>,
+    /// The claimed video interface; released by [`Link::close`] (with the writer and, by joining
+    /// the receive thread, the reader), not when the last `Arc<Link>` goes, so a new session can
+    /// claim it right away (Windows refuses a second open of a WinUSB interface).
+    usb: Mutex<Option<(Device, Interface)>>,
+    rx_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     transport_name: String,
     selected_transport: LinkTransport,
     pub shared: Arc<Shared>,
@@ -256,7 +260,7 @@ fn select_initial<T>(
 impl Link {
     /// Connect (retrying until `connect_timeout`) and start the receive + ping threads.
     pub fn connect(o: &LinkOptions, log: LogFn) -> Result<Arc<Link>, String> {
-        let ((writer, reader, raw, usb, transport_name), selected_transport) = select_initial(
+        let ((writer, mut reader, raw, usb, transport_name), selected_transport) = select_initial(
             &o.transport,
             || {
                 let (writer, reader, raw) = open_tcp(&o.addr, o.connect_timeout)?;
@@ -274,6 +278,15 @@ impl Link {
                 Ok((writer, reader, None, Some(usb), name))
             },
         )?;
+        // After the launch (the previous bridge is gone) and before our first byte (the bridge
+        // says nothing until then), whatever the IN endpoint holds is left from the previous
+        // session, possibly the tail of a message it was sending: it would break the framing.
+        if let Reader::Usb(r) = &mut reader {
+            let stale = drain_stale(r, Duration::from_millis(500));
+            if stale > 0 {
+                log(format!("discarded {stale} bytes left on the video interface by the previous session"));
+            }
+        }
         let ot = match &o.opentrack {
             Some(a) if !a.is_empty() => {
                 let addr = a
@@ -307,7 +320,8 @@ impl Link {
         let link = Arc::new(Link {
             raw,
             sock: Mutex::new(Some(writer)),
-            _usb: usb,
+            usb: Mutex::new(usb),
+            rx_thread: Mutex::new(None),
             transport_name,
             selected_transport,
             shared,
@@ -320,7 +334,8 @@ impl Link {
         {
             let l = link.clone();
             let rx = reader;
-            std::thread::Builder::new().name("ep-rx".into()).spawn(move || l.rx_loop(rx)).unwrap();
+            let rx_thread = std::thread::Builder::new().name("ep-rx".into()).spawn(move || l.rx_loop(rx)).unwrap();
+            *link.rx_thread.lock().unwrap() = Some(rx_thread);
         }
         {
             let l = link.clone();
@@ -353,6 +368,14 @@ impl Link {
         drop(_gui_ack);
         drop(_ack);
         self.shutdown_io();
+        // the receive thread holds the reader (and with it the interface) until it sees `alive`
+        // false, within its 100 ms read timeout; wait for it unless this is that thread
+        let rx_thread = self.rx_thread.lock().unwrap().take();
+        if let Some(t) = rx_thread {
+            if t.thread().id() != std::thread::current().id() {
+                let _ = t.join();
+            }
+        }
     }
 
     fn fail(&self, e: std::io::Error) -> std::io::Error {
@@ -375,6 +398,7 @@ impl Link {
             let _ = raw.shutdown(std::net::Shutdown::Both);
         }
         self.sock.lock().unwrap().take();
+        self.usb.lock().unwrap().take();
     }
 
     fn write_parts(&self, parts: &[&[u8]]) -> std::io::Result<()> {
@@ -721,6 +745,21 @@ fn bridge_ack_id(id: Option<&str>) -> std::io::Result<u32> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid bridge acknowledgement ID"))
 }
 
+/// Read and drop what arrives until the endpoint is quiet for one read timeout (at most `limit`).
+fn drain_stale<R: Read>(reader: &mut R, limit: Duration) -> usize {
+    let t0 = Instant::now();
+    let mut buf = [0u8; 4096];
+    let mut dropped = 0;
+    while t0.elapsed() < limit {
+        match reader.read(&mut buf) {
+            Ok(n) => dropped += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,                     // TimedOut: quiet
+        }
+    }
+    dropped
+}
+
 fn read_exact_active<R: Read>(reader: &mut R, buf: &mut [u8], alive: &AtomicBool) -> std::io::Result<()> {
     let mut offset = 0;
     while offset < buf.len() {
@@ -767,6 +806,25 @@ fn write_all_vectored(s: &mut TcpStream, parts: &[&[u8]]) -> std::io::Result<()>
 
 #[cfg(test)]
 mod tests {
+    /// Chunks, then a read timeout (an endpoint that went quiet).
+    struct Chunks(Vec<Vec<u8>>);
+    impl Read for Chunks {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.0.is_empty() {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+            let c = self.0.remove(0);
+            buf[..c.len()].copy_from_slice(&c);
+            Ok(c.len())
+        }
+    }
+
+    #[test]
+    fn drain_stale_drops_until_quiet() {
+        let mut r = Chunks(vec![vec![1; 300], vec![], vec![2; 212]]);
+        assert_eq!(drain_stale(&mut r, Duration::from_secs(1)), 512);
+        assert_eq!(drain_stale(&mut Chunks(vec![]), Duration::from_secs(1)), 0);
+    }
     use super::*;
     use std::collections::VecDeque;
 
@@ -1222,7 +1280,8 @@ mod tests {
         let link = Arc::new(Link {
             sock: Mutex::new(Some(Writer::Tcp(client))),
             raw: Some(raw),
-            _usb: None,
+            usb: Mutex::new(None),
+            rx_thread: Mutex::new(None),
             transport_name: "TCP test".into(),
             selected_transport: LinkTransport::Tcp,
             shared,
