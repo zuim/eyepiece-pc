@@ -28,8 +28,10 @@ cargo build --release --locked -p eyepiece-pc "$@"
 OUT="$TARGET/appimage"
 APPDIR="$OUT/AppDir"
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/scalable/apps"
 strip -o "$APPDIR/usr/bin/eyepiece-pc" "$TARGET/release/eyepiece-pc"
+cp "$HERE/eyepiece-pc.desktop" "$APPDIR/usr/share/applications/"
+cp "$HERE/eyepiece-pc.svg" "$APPDIR/usr/share/icons/hicolor/scalable/apps/"
 cp README.md LICENSE "$APPDIR/"
 
 cat > "$OUT/AppRun" <<'EOF'
@@ -44,6 +46,8 @@ if [ -z "$LD" ]; then
     LD="$(command -v linuxdeploy || command -v linuxdeploy-x86_64.AppImage || true)"
 fi
 if [ -z "$LD" ]; then
+    ln -sf usr/share/applications/eyepiece-pc.desktop "$APPDIR/eyepiece-pc.desktop"
+    ln -sf usr/share/icons/hicolor/scalable/apps/eyepiece-pc.svg "$APPDIR/eyepiece-pc.svg"
     cp "$OUT/AppRun" "$APPDIR/AppRun"
     echo "AppDir ready: $APPDIR (linuxdeploy not found, no AppImage built; set LINUXDEPLOY)" >&2
     exit 3
@@ -56,6 +60,8 @@ export LDAI_OUTPUT="eyepiece-pc-$VERSION-linux-x86_64.AppImage"
 export APPIMAGE_EXTRACT_AND_RUN=1
 "$LD" --appdir "$APPDIR" \
     --executable "$APPDIR/usr/bin/eyepiece-pc" \
+    --desktop-file "$APPDIR/usr/share/applications/eyepiece-pc.desktop" \
+    --icon-file "$APPDIR/usr/share/icons/hicolor/scalable/apps/eyepiece-pc.svg" \
     --custom-apprun "$OUT/AppRun" \
     --exclude-library 'libva*' --exclude-library 'libvdpau*' --exclude-library 'libOpenCL*' \
     --exclude-library 'libvulkan*' --exclude-library 'libcuda*' --exclude-library 'libnvidia*' \

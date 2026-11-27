@@ -304,45 +304,40 @@ fn connect(cfg: &mut Config, enc: &EncoderConfig, ev: &Events) -> Result<Option<
         l.close();
         return Err("bridge did not provide compatible protobuf protocol information; update the bridge".into());
     }
-    if cfg.gui_opacity != 100 || l.info().is_some_and(|i| i.flags & proto::EP_INFO_GUI_ALPHA_ACTIVE != 0) {
-        l.set_gui_alpha(gui_alpha(cfg.gui_opacity), Duration::from_secs(3))
-            .map_err(|e| format!("GUI opacity: {e}"))?;
-    }
-    if cfg.video {
-        if cfg.stereo || cfg.pane.is_some() {
-            // EP_INFO comes right after the connect: only stereo-capable bridges get SBS
-            let t0 = std::time::Instant::now();
-            while l.info().is_none() && t0.elapsed() < Duration::from_secs(2) {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            if cfg.stereo && l.info().is_none_or(|i| i.flags & proto::EP_INFO_STEREO == 0) {
-                return Err("this eyepiece_bridge has no stereo support (needs natartos \
-                            v0.1.0-eyepiece.5 or newer, or --bridge with a current build)"
-                    .into());
-            }
-            if cfg.pane.is_some() && cfg.reconnect && l.info().is_none_or(|i| i.flags & proto::EP_INFO_PANE_RECONNECT == 0) {
-                return Err("this eyepiece_bridge does not support GFX1 reconnect; start a current bridge with -R".into());
-            }
-        }
-        let configured = l
-            .configure(stream_config(cfg, enc.codec.wire()), Duration::from_secs(5))
-            .map_err(|e| format!("stream configuration: {e}"))
-            .and_then(|()| {
-                if cfg.pane.is_some()
-                    && (cfg.pane_opacity != 100 || l.info().is_some_and(|i| i.flags & proto::EP_INFO_PANE_ALPHA != 0))
-                {
-                    l.set_pane_alpha(gui_alpha(cfg.pane_opacity), Duration::from_secs(3))
-                        .map_err(|e| format!("pane opacity: {e}"))?;
-                }
-                Ok(())
-            });
-        if let Err(error) = configured {
-            l.close();
-            return Err(error);
-        }
+    let flags = l.info().map_or(0, |i| i.flags);
+    let configured = configure_link(&l, cfg, enc, flags);
+    if let Err(error) = configured {
+        l.close();
+        return Err(error);
     }
     ev.link_changed(Some(l.clone()));
     Ok(Some(l))
+}
+
+/// A connection starts with the goggles' UI hidden (GUI opacity 0) and a fully opaque pane; only
+/// other values are sent, and they need the bridge's capability.
+fn configure_link(l: &Link, cfg: &Config, enc: &EncoderConfig, flags: u32) -> Result<(), String> {
+    if cfg.gui_opacity != 0 {
+        if flags & proto::EP_INFO_GUI_ALPHA == 0 {
+            return Err("this bridge cannot show the goggles' UI (no GUI_ALPHA); use --gui-opacity 0".into());
+        }
+        l.set_gui_alpha(gui_alpha(cfg.gui_opacity), Duration::from_secs(3)).map_err(|e| format!("GUI opacity: {e}"))?;
+    }
+    if !cfg.video {
+        return Ok(());
+    }
+    if cfg.stereo && flags & proto::EP_INFO_STEREO == 0 {
+        return Err("this bridge offers no stereo now (a bridge started from the goggles' menu shows mono only)".into());
+    }
+    l.configure(stream_config(cfg, enc.codec.wire()), Duration::from_secs(5))
+        .map_err(|e| format!("stream configuration: {e}"))?;
+    if cfg.pane.is_some() && cfg.pane_opacity != 100 {
+        if flags & proto::EP_INFO_PANE_ALPHA == 0 {
+            return Err("this bridge cannot change the pane opacity (no PANE_ALPHA)".into());
+        }
+        l.set_pane_alpha(gui_alpha(cfg.pane_opacity), Duration::from_secs(3)).map_err(|e| format!("pane opacity: {e}"))?;
+    }
+    Ok(())
 }
 
 fn gui_alpha(opacity: u8) -> u8 {
@@ -525,12 +520,11 @@ pub fn run(mut cfg: Config, ctl: Arc<Control>, ev: Events) -> Result<(), String>
                                     candidate_cfg.pane = Some(pane);
                                 }
                                 let size_changed = candidate_cfg.frame_size() != capture_cfg.frame_size();
-                                let mut reopen_source = source_changed || (size_changed && matches!(candidate_cfg.source, SourceKind::Test { .. }));
+                                let reopen_source = source_changed || (size_changed && matches!(candidate_cfg.source, SourceKind::Test { .. }));
                                 #[cfg(target_os = "macos")]
-                                {
-                                    reopen_source |= pane.is_some() && matches!(candidate_cfg.source, SourceKind::ScreenCaptureKit { .. })
-                                        && (size_changed || candidate_cfg.pane.map(|p| p.pane.format) != capture_cfg.pane.map(|p| p.pane.format));
-                                }
+                                let reopen_source = reopen_source
+                                    || (pane.is_some() && matches!(candidate_cfg.source, SourceKind::ScreenCaptureKit { .. })
+                                        && (size_changed || candidate_cfg.pane.map(|p| p.pane.format) != capture_cfg.pane.map(|p| p.pane.format)));
                                 let mut new_source = if reopen_source { Some(make_source(&candidate_cfg, family)?) } else { None };
                                 let mut new_convert_cfg = convert_cfg.clone();
                                 if let Some(pane) = pane {
@@ -665,12 +659,8 @@ pub fn run(mut cfg: Config, ctl: Arc<Control>, ev: Events) -> Result<(), String>
                         l.set_gui_alpha(gui_alpha(update.opacity), Duration::from_secs(3))
                             .map_err(|e| format!("{name}: {e}"))
                     };
-                    if update.pane && result.is_ok() {
-                        cfg.pane_opacity = update.opacity;
-                    } else if !update.pane && result.is_ok() {
-                        cfg.gui_opacity = update.opacity;
-                    } else if !update.pane {
-                        cfg.gui_opacity = 100;
+                    if result.is_ok() {
+                        if update.pane { cfg.pane_opacity = update.opacity } else { cfg.gui_opacity = update.opacity }
                     }
                     (update.complete)(result);
                 }
@@ -1123,7 +1113,7 @@ mod tests {
         let BridgeEvent::Request(initial) = bridge_rx.recv_timeout(Duration::from_secs(10)).unwrap() else { panic!("missing configure") };
         assert_eq!((initial.codec, initial.layout), (0, 0));
         assert_eq!(initial.pane.map(|p| (p.width, p.height)), Some((64, 64)));
-        assert!(matches!(bridge_rx.recv_timeout(Duration::from_secs(10)).unwrap(), BridgeEvent::Opacity(255)));
+        // a fully opaque pane is the connection's start state: no PaneAlpha is sent for it
         assert!(matches!(bridge_rx.recv_timeout(Duration::from_secs(10)).unwrap(), BridgeEvent::Video(true, _)));
         for (opacity, alpha, accepted) in [(50, 128, true), (0, 0, false), (100, 255, true)] {
             let (done_tx, done_rx) = mpsc::channel();

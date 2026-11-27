@@ -1,4 +1,4 @@
-//! TCP connection to eyepiece_bridge: send side (video/stream/ping/ctrl), receive thread
+//! Connection to the goggles bridge (pcdisplay_bridge, over USB or TCP): send side (video/stream/ping/ctrl), receive thread
 //! (pose, pong, frame reports, log, info), clock sync, IDR requests, opentrack output.
 
 use crate::clock::mono_us;
@@ -183,7 +183,7 @@ fn open_tcp(addr: &str, timeout: Duration) -> Result<(Writer, Reader, TcpStream)
             Err(e) => {
                 if Instant::now() >= t_end {
                     return Err(format!(
-                        "cannot connect to eyepiece_bridge on {addr} ({e}); is it running and is \
+                        "cannot connect to the bridge on {addr} ({e}); is it running and is \
                          `adb forward tcp:{p} tcp:{p}` set?",
                         p = EP_PORT
                     ));
@@ -204,11 +204,11 @@ fn open_usb(serial: Option<&str>) -> Result<(Writer, Reader, (Device, Interface)
     let in_endpoint = usb
         .interface
         .endpoint::<Bulk, In>(endpoints.in_address)
-        .map_err(|e| format!("cannot open Eyepiece bulk IN endpoint ({e})"))?;
+        .map_err(|e| format!("cannot open video interface IN endpoint ({e})"))?;
     let out_endpoint = usb
         .interface
         .endpoint::<Bulk, Out>(endpoints.out_address)
-        .map_err(|e| format!("cannot open Eyepiece bulk OUT endpoint ({e})"))?;
+        .map_err(|e| format!("cannot open video interface OUT endpoint ({e})"))?;
     // A full-size USB packet does not terminate a larger bulk transfer.
     // Read one packet at a time so sparse frame reports are not held until
     // a short packet or 64 KiB of subsequent traffic arrives.

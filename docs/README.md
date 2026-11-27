@@ -1,7 +1,7 @@
 # Eyepiece documentation
 
 Eyepiece uses the DJI Goggles 3 as a USB display for a PC, with head tracking sent back. These pages
-cover the PC tool (`eyepiece-pc`) and the goggles side (the natartos Eyepiece mod and `eyepiece_bridge`).
+cover the PC tool (`eyepiece-pc`) and the goggles side (tinkerglass's PC Display mod and `pcdisplay_bridge`).
 Start with the [project README](../README.md) for an overview.
 
 ## Using Eyepiece
@@ -12,7 +12,7 @@ Start with the [project README](../README.md) for an overview.
 | [Command-line usage](usage.md) | Starting a stream, resolution, statistics, options |
 | [Picture in picture and transparency](pip-and-transparency.md) | GFX1 pane, colour key, GUI and pane opacity |
 | [Head tracking into games](head-tracking.md) | opentrack output, Wine/Proton, Linux games |
-| [Transports and USB bulk](transports.md) | `adb forward` and the dedicated USB interface |
+| [Transports and USB bulk](transports.md) | tinkerglass's video interface and `adb forward` |
 | [Web UI](web-ui.md) | The browser interface, live settings, preview |
 | [macOS](macos.md) | ScreenCaptureKit, VideoToolbox, the app bundle |
 

@@ -5,8 +5,8 @@ How to install `eyepiece-pc` on the PC, and what the goggles need. To build from
 
 ## What you need
 
-- The DJI Goggles 3 running natartos with the **Eyepiece mod** (see [the goggles side](goggles/bridge.md)),
-  rooted with [toolya](https://toolya.dev).
+- The DJI Goggles 3 running [tinkerglass](https://github.com/tinkerglass-org/tinkerglass) with its **PC Display**
+  mod (see [the goggles side](goggles/bridge.md)).
 - A USB cable to the goggles and `adb` (Android platform-tools) on the PC.
 - This tool, `eyepiece-pc`, from a release or built from source.
 
@@ -29,10 +29,9 @@ Download from the GitHub releases page:
   ad-hoc signed, **not Developer ID signed or notarized**, so Gatekeeper can
   block it until the user explicitly approves it in System Settings.
 
-You also need `adb` (Android platform-tools) and the goggles running natartos with the
-Eyepiece mod. eyepiece-pc starts the bridge installed with the mod by itself; to use a
-different `eyepiece_bridge` (e.g. a newer natartos release), put it next to the `eyepiece-pc`
-executable or in `~/.local/share/eyepiece/` (`$XDG_DATA_HOME/eyepiece/`), or pass `--bridge`.
+You also need `adb` (Android platform-tools) and the goggles running tinkerglass with the PC Display
+mod. eyepiece-pc starts the bridge installed with the mod by itself; it does not push a bridge to the goggles.
+On Windows the video interface binds WinUSB by itself, so there is no driver to install.
 On macOS, ensure Homebrew's `bin` directory is on PATH so `adb` can be found
 (typically `/opt/homebrew/bin`).
 The optional external `--preview` window also requires `ffplay` on PATH.
