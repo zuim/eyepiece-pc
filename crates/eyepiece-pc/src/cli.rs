@@ -21,12 +21,17 @@ use std::time::Duration;
     name = "eyepiece-pc",
     version,
     about = "Stream the PC screen to DJI Goggles 3 over USB (Eyepiece PC side)",
-    after_help = "Keys (stdin): r + Enter = recenter, i + Enter = force IDR, q + Enter = quit.\n\
-Examples:\n  eyepiece-pc                                 # start the bridge on the goggles, KMS capture of the first screen\n  \
-eyepiece-pc --output eDP-1 --encoder nvenc --bitrate 30M\n  \
-eyepiece-pc --no-launch                     # use the bridge started from the goggles' menu\n  \
-eyepiece-pc --source test --host 127.0.0.1:42420   # against pcdisplay_bridge_host -N -p 42420\n  \
-eyepiece-pc --list                          # outputs / planes"
+    max_term_width = 100,
+    after_help = "The web UI (http://127.0.0.1:4174/) runs alongside and owns the settings: options \
+given here are saved, and the next start uses them. --no-web streams with only the given options \
+and saves nothing.\n\n\
+Keys (stdin, each + Enter): r recenter, i keyframe, q quit.\n\n\
+Examples:\n  \
+eyepiece-pc               # stream, web UI alongside\n  \
+eyepiece-pc --open-web    # ... and open it in the browser\n  \
+eyepiece-pc --no-web --encoder nvenc --bitrate 30M\n  \
+eyepiece-pc --no-launch   # use the bridge of the goggles\n  \
+eyepiece-pc --list        # outputs / planes"
 )]
 pub struct Args {
     // ---- connection (USB: the goggles in tinkerglass USB mode) ----
@@ -219,10 +224,57 @@ pub struct Args {
     /// FFmpeg log level (quiet, error, warning, info, verbose, debug)
     #[arg(long, default_value = "warning")]
     pub ffmpeg_log: String,
-    /// start the local web interface
+    // ---- web UI and desktop ----
+    /// open the web UI in the browser (it runs anyway unless --no-web)
+    #[arg(long, visible_alias = "open", conflicts_with = "no_web")]
+    #[serde(skip)]
+    pub open_web: bool,
+    /// command-line mode: no web UI, stream with only the given options, save nothing, exit
+    /// when the stream ends. Implied by --list, --no-connect, --dump, --frames, --duration,
+    /// --preview and --print-pose (unless --web)
     #[arg(long)]
     #[serde(skip)]
+    pub no_web: bool,
+    /// (the default; kept for scripts) keep the web UI even with the options that imply --no-web
+    #[arg(long, hide = true, conflicts_with = "no_web")]
+    #[serde(skip)]
     pub web: bool,
+    /// Windows: show the notification-area icon (open the web UI, start/stop, quit); the
+    /// default when started by a double-click
+    #[arg(long, conflicts_with = "no_web", hide = !cfg!(windows))]
+    #[serde(skip)]
+    pub tray: bool,
+}
+
+/// Options that only make sense for one run (benchmarks, diagnostics). Given without `--web`
+/// they select the command-line mode, so they never end up in the web UI's saved settings.
+const ONE_RUN_OPTIONS: &[&str] = &["list", "no_connect", "dump", "frames", "duration", "preview", "print_pose"];
+
+/// Options about the frontend itself, never saved as settings.
+pub(crate) const FRONTEND_OPTIONS: &[&str] = &["web", "no_web", "open_web", "tray"];
+
+/// How the binary runs: with the web UI (the default) or as a plain command-line streamer.
+#[derive(Debug, PartialEq)]
+enum Mode {
+    Web(crate::rpc::WebOptions),
+    CommandLine,
+}
+
+/// `desktop`: started without a terminal (a double-click on Windows).
+fn mode(a: &Args, overrides: &std::collections::HashSet<String>, desktop: bool) -> Mode {
+    let one_run = ONE_RUN_OPTIONS.iter().any(|name| overrides.contains(*name));
+    if a.no_web || (one_run && !a.web) {
+        return Mode::CommandLine;
+    }
+    Mode::Web(crate::rpc::WebOptions {
+        tray: cfg!(windows) && (a.tray || desktop),
+        // a double-click should show something: the web UI
+        open_browser: a.open_web || desktop,
+        // from a terminal `eyepiece-pc` streams at once, as it always did; a desktop start only
+        // resumes a stream that was running when it was last closed
+        start: !desktop,
+        terminal: !desktop,
+    })
 }
 
 fn parse_rate(s: &str) -> Result<u64, String> {
@@ -434,15 +486,30 @@ pub fn main() {
         }
         return;
     }
+    let desktop = crate::desktop::started_from_desktop();
     let matches = Args::command().get_matches();
     let overrides = explicit_options(&matches);
     let a = Args::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    if a.web {
-        if let Err(e) = crate::rpc::run_web(a, overrides) {
-            eprintln!("[eyepiece-pc] RPC error: {e}");
-            std::process::exit(1);
+    if a.tray && !cfg!(windows) {
+        eprintln!("[eyepiece-pc] --tray is only available on Windows");
+        std::process::exit(2);
+    }
+    if let Mode::Web(options) = mode(&a, &overrides, desktop) {
+        match crate::rpc::run_web(a.clone(), overrides, options) {
+            Ok(()) => return,
+            // a development build without `pnpm build`: stream without the web UI (but never
+            // from a double-click, where nobody would see it)
+            Err(crate::rpc::WebError::NotBuilt(e)) if !desktop && !a.web && !a.open_web && !a.tray => {
+                eprintln!("[eyepiece-pc] {e}; running without the web UI (--no-web)");
+            }
+            Err(e) => {
+                if desktop {
+                    crate::desktop::error_box(&e.to_string());
+                }
+                eprintln!("[eyepiece-pc] {e}");
+                std::process::exit(1);
+            }
         }
-        return;
     }
     let log = log_fn();
     if let Err(e) = real_main(a, log.clone()) {
@@ -817,6 +884,44 @@ mod tests {
         assert!(overrides.contains("source"));
         assert!(overrides.contains("no_connect"));
         assert!(!overrides.contains("fps"));
+    }
+
+    fn mode_of(argv: &[&str], desktop: bool) -> Mode {
+        let matches = Args::command()
+            .try_get_matches_from(std::iter::once("eyepiece-pc").chain(argv.iter().copied()))
+            .unwrap();
+        mode(&Args::from_arg_matches(&matches).unwrap(), &explicit_options(&matches), desktop)
+    }
+
+    #[test]
+    fn the_web_ui_runs_by_default_and_one_run_options_select_the_command_line() {
+        let terminal = crate::rpc::WebOptions { open_browser: false, tray: false, start: true, terminal: true };
+        assert_eq!(mode_of(&[], false), Mode::Web(terminal.clone()));
+        assert_eq!(mode_of(&["--source", "test", "--bitrate", "30M"], false), Mode::Web(terminal.clone()));
+        assert_eq!(
+            mode_of(&["--open-web"], false),
+            Mode::Web(crate::rpc::WebOptions { open_browser: true, ..terminal.clone() })
+        );
+        assert_eq!(mode_of(&["--open"], false), mode_of(&["--open-web"], false));
+        assert_eq!(mode_of(&["--no-web"], false), Mode::CommandLine);
+        for one_run in [&["--list"][..], &["--no-connect"], &["--duration", "10"], &["--frames", "5"], &["--dump", "x.h264"], &["--print-pose"], &["--preview"]] {
+            assert_eq!(mode_of(one_run, false), Mode::CommandLine, "{one_run:?}");
+        }
+        // --web keeps the old explicit behaviour: the web UI with these options as settings
+        assert!(matches!(mode_of(&["--web", "--no-connect", "--duration", "10"], false), Mode::Web(_)));
+        assert!(Args::try_parse_from(["eyepiece-pc", "--no-web", "--open-web"]).is_err());
+        // a double-click: the browser opens, the stream only resumes, the tray icon on Windows
+        assert_eq!(
+            mode_of(&[], true),
+            Mode::Web(crate::rpc::WebOptions { open_browser: true, tray: cfg!(windows), start: false, terminal: false })
+        );
+    }
+
+    #[test]
+    fn help_fits_a_narrow_terminal() {
+        let help = Args::command().term_width(60).render_long_help().to_string();
+        let widest = help.lines().map(|line| line.chars().count()).max().unwrap();
+        assert!(widest <= 60, "help line of {widest} columns");
     }
 
     #[test]
