@@ -200,10 +200,13 @@ struct Pending {
 }
 
 /// Connect and announce the stream (EP_STREAM must precede video).
-fn connect(cfg: &Config, enc: &EncoderConfig, ev: &Events) -> Result<Option<Arc<Link>>, String> {
-    let Some(lo) = &cfg.link else { return Ok(None) };
-    let l = Link::connect(lo, ev.log.clone())?;
-    (ev.log)(format!("connected to eyepiece_bridge via {}", lo.addr));
+fn connect(cfg: &mut Config, enc: &EncoderConfig, ev: &Events) -> Result<Option<Arc<Link>>, String> {
+    let Some(lo) = cfg.link.clone() else { return Ok(None) };
+    let l = Link::connect(&lo, ev.log.clone())?;
+    if let Some(options) = cfg.link.as_mut() {
+        options.transport = l.selected_transport();
+    }
+    (ev.log)(format!("data link: {}", l.transport_name()));
     if cfg.video {
         if cfg.stereo {
             // EP_INFO comes right after the connect: only stereo-capable bridges get SBS
@@ -249,7 +252,9 @@ pub fn run(mut cfg: Config, ctl: Arc<Control>, ev: Events) -> Result<(), String>
             }
         }
     }
-    let link: Arc<Mutex<Option<Arc<Link>>>> = Arc::new(Mutex::new(connect(&cfg, &cfg.enc, &ev)?));
+    let enc_settings = cfg.enc.clone();
+    let link: Arc<Mutex<Option<Arc<Link>>>> =
+        Arc::new(Mutex::new(connect(&mut cfg, &enc_settings, &ev)?));
 
     // ---- stats thread ----
     {
@@ -418,7 +423,7 @@ pub fn run(mut cfg: Config, ctl: Arc<Control>, ev: Events) -> Result<(), String>
                     lo.connect_timeout = Duration::from_millis(500);
                     lo.head_tracking = head_tracking;
                 }
-                if let Ok(Some(l)) = connect(&c2, &cfg.enc, &ev) {
+                if let Ok(Some(l)) = connect(&mut c2, &cfg.enc, &ev) {
                     *link.lock().unwrap() = Some(l);
                     need_idr.store(true, Ordering::Relaxed); // the bridge waits for an IDR
                 }

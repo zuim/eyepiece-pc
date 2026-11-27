@@ -8,7 +8,7 @@ use clap::Parser;
 use eyepiece_av::{Codec, EncoderConfig};
 use eyepiece_capture::SyncMode;
 use eyepiece_link::adb::Adb;
-use eyepiece_link::{LinkOptions, LogFn};
+use eyepiece_link::{LinkOptions, LinkTransport, LogFn};
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -69,12 +69,8 @@ pub struct Args {
     /// host to connect to (adb forward ends on 127.0.0.1; RNDIS/Wi-Fi: goggles IP + bridge -A)
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
-    /// data link: auto (the goggles' USB network when it comes up, else adb forward) |
-    /// usb-net (USB network only) | adb (adb forward only, no USB switch). The bridge
-    /// switches the goggles' USB to network (RNDIS) + adb once per boot and hands out an
-    /// address by DHCP; connect that network on the PC once (no special settings) for
-    /// ~2–4 ms lower latency. Linux finds the interface; other systems check that the
-    /// goggles answer on it
+    /// data link: auto (USB bulk, then USB network, then adb) | usb-bulk (strict) |
+    /// usb-net (strict RNDIS) | adb (adb forward only)
     #[arg(long, default_value = "auto")]
     pub transport: String,
     /// don't run `adb forward` (host bridge, RNDIS, forward set up elsewhere)
@@ -395,18 +391,37 @@ fn limit_privileges(a: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// Where to connect: the goggles' USB network if usable (see `--transport`), else the
-/// `adb forward` end (`--host`, 127.0.0.1).
-fn pick_host(a: &Args, log: &dyn Fn(String)) -> Result<String, String> {
-    let mode = a.transport.as_str();
+fn validate_transport(mode: &str) -> Result<(), String> {
     match mode {
-        "auto" | "usb-net" | "adb" => {}
-        m => return Err(format!("--transport {m}: expected auto | usb-net | adb")),
+        "auto" | "usb-bulk" | "usb-net" | "adb" => Ok(()),
+        _ => Err(format!("--transport {mode}: expected auto | usb-bulk | usb-net | adb")),
     }
-    if mode == "adb" || a.host != "127.0.0.1" {
-        return Ok(a.host.clone()); // explicit --host (host bridge, Wi-Fi, …) wins
+}
+
+/// Select USB before opening any bridge session; `addr` remains the TCP fallback for auto.
+fn pick_connection(a: &Args, log: &dyn Fn(String)) -> Result<(String, LinkTransport), String> {
+    let mode = a.transport.as_str();
+    validate_transport(mode)?;
+    if mode == "adb" || (mode != "usb-bulk" && a.host != "127.0.0.1") {
+        return Ok((a.host.clone(), LinkTransport::Tcp));
     }
-    pick_usb_net(a, mode == "usb-net", log)
+    match mode {
+        "usb-bulk" => Ok((a.host.clone(), LinkTransport::UsbBulk { serial: a.serial.clone() })),
+        "usb-net" => Ok((pick_usb_net(a, true, log)?, LinkTransport::Tcp)),
+        "auto" => match eyepiece_link::usb::probe(a.serial.as_deref()) {
+            Ok(()) => {
+                let quiet = |_: String| {};
+                let fallback = pick_usb_net(a, false, &quiet)?;
+                log("transport selection: USB bulk preferred; USB network/ADB kept as fallback".into());
+                Ok((fallback, LinkTransport::Auto { serial: a.serial.clone() }))
+            }
+            Err(reason) => {
+                log(format!("NOTICE: USB bulk unavailable ({reason}); using existing USB-network/ADB selection."));
+                Ok((pick_usb_net(a, false, log)?, LinkTransport::Tcp))
+            }
+        },
+        _ => unreachable!(),
+    }
 }
 
 /// Linux: find the goggles' RNDIS interface in sysfs and check that it has its address, so
@@ -543,12 +558,16 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
 
     let adb = Adb::new(a.adb.clone(), a.serial.clone());
     if !a.no_connect {
+        validate_transport(&a.transport)?;
         if !a.no_deploy {
             let bridge = a.bridge.clone().or_else(find_bridge);
+            let usb_net = matches!(a.transport.as_str(), "auto" | "usb-net");
+            let usb_bulk = matches!(a.transport.as_str(), "auto" | "usb-bulk");
             adb.deploy(
                 bridge.as_deref(),
                 &a.bridge_args,
-                a.transport != "adb",
+                usb_net,
+                usb_bulk,
                 &**log,
             )?;
         } else if !a.no_forward && !adb.bridge_running() {
@@ -562,13 +581,14 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
             adb.forward(a.port, a.port)?;
         }
     }
-    let host = if a.no_connect {
-        a.host.clone()
+    let (host, transport) = if a.no_connect {
+        (a.host.clone(), LinkTransport::Tcp)
     } else {
-        pick_host(a, &**log)?
+        pick_connection(a, &**log)?
     };
     let link = (!a.no_connect).then(|| LinkOptions {
         addr: format!("{}:{}", host, a.port),
+        transport,
         connect_timeout: Duration::from_secs(15),
         opentrack: (!a.opentrack.is_empty()).then(|| a.opentrack.clone()),
         print_pose: a.print_pose,
@@ -695,5 +715,13 @@ mod tests {
         assert!(args.tune.is_none());
         assert!(args.profile.is_none());
         assert!(args.enc_opt.is_empty());
+    }
+
+    #[test]
+    fn usb_bulk_transport_option_parses() {
+        let args = Args::try_parse_from(["eyepiece-pc", "--transport", "usb-bulk"]).unwrap();
+        assert_eq!(args.transport, "usb-bulk");
+        validate_transport(&args.transport).unwrap();
+        assert!(validate_transport("bad").is_err());
     }
 }

@@ -279,6 +279,16 @@ busy, `idr` = forced IDRs.
 Environment: `EYEPIECE_FILTER_DOWNLOAD=1` forces the libavfilter `hwdownload` path in the
 converter (debugging).
 
+### USB bulk transfers
+
+`--transport usb-bulk` selects the dedicated `Eyepiece bulk` interface without TCP
+fallback. `auto` attempts bulk before the existing RNDIS/ADB selection, and reconnects
+retain the initially selected transport. `--serial` selects the USB device.
+
+The host uses the pure-Rust `nusb` library. Linux needs device-scoped USB permissions;
+macOS needs the vendor interface free of other drivers; Windows needs WinUSB bound
+only to the Eyepiece interface, never the ADB or RNDIS interfaces.
+
 ### USB network (lower latency than adb)
 
 A current `eyepiece_bridge` switches the goggles' USB once per boot to a USB network
