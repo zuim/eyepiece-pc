@@ -17,7 +17,8 @@ elsewhere. A development build without a built app falls back to the command-lin
 ## Using it
 
 The tabs are **Overview**, **Statistics**, **Compare**, **Settings** and **Log**. Basic stream controls
-(start or stop, restart) and the capture, connection and video selectors stay above the tabs. With the
+(start or stop, restart) and the capture, connection and video selectors stay above the tabs. **Quit** in the
+header asks for confirmation, then stops the stream and exits eyepiece-pc. With the
 *File* capture, **Browse…** opens the system's file dialog on the PC (eyepiece-pc shows it; the page only
 gets the path back) and the path field accepts a typed or pasted path. There is no keyframe button: the
 stream sends a keyframe every two seconds (`--gop`), on every connect and whenever the goggles or the

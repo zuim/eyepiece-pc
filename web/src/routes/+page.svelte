@@ -23,7 +23,7 @@
   import { OptimisticSettings } from "$lib/optimistic-settings";
   import { PaneDragThrottle } from "$lib/pane-drag-throttle";
   import type { Pose } from "$lib/pose-model";
-  import { metricValues, pickVideoFile, previewCommand, propertyValue, wireValue, type RpcCommand, type RpcResponse } from "$lib/rpc";
+  import { metricValues, pickVideoFile, quitApp, previewCommand, propertyValue, wireValue, type RpcCommand, type RpcResponse } from "$lib/rpc";
   import { appendSample, summarizeWindow, type MetricSample } from "$lib/telemetry";
   import {
     defaultPreferences,
@@ -65,6 +65,8 @@
   const statusHelp = $derived(errorHelp(statusMessage));
   let resetUndo = $state.raw<Record<string, unknown>>();
   let confirmingReset = $state(false);
+  let confirmingQuit = $state(false);
+  let quit = $state(false);
   let preferencesReady = $state(false);
   // Not rendered, so plain variables.
   let subscribedPreviewOn = false;
@@ -172,6 +174,16 @@
       await send({ listKmsOutputs: {} });
     } finally {
       listingKmsOutputs = false;
+    }
+  }
+
+  async function quitEyepiece() {
+    try {
+      await quitApp();
+      quit = true;
+      connection.dispose();
+    } catch (error) {
+      statusMessage = `Cannot quit: ${errorMessage(error)}`;
     }
   }
 
@@ -367,7 +379,10 @@
     <a class="brand" href="/"
       ><span class="brand-mark">E</span><span>eyepiece<span class="brand-sub"> / PC CONTROL</span></span></a
     >
-    <StatusBar {workerStatus} {phase} {connected} {desiredRunning} noConnect={Boolean(values.no_connect)} />
+    <div class="header-actions">
+      <StatusBar {workerStatus} {phase} {connected} {desiredRunning} noConnect={Boolean(values.no_connect)} />
+      <button class="secondary quit-button" disabled={!workerConnected} onclick={() => (confirmingQuit = true)}>Quit</button>
+    </div>
   </header>
 
   {#if statusMessage}<div class="alert" role="alert">
@@ -385,6 +400,14 @@
     confirmLabel="Reset Settings"
     onConfirm={() => void resetSettings()}
   />
+  <ConfirmDialog
+    bind:open={confirmingQuit}
+    title="Quit eyepiece-pc?"
+    message="The stream stops and eyepiece-pc exits; this page stops working until you start it again."
+    confirmLabel="Quit"
+    onConfirm={() => void quitEyepiece()}
+  />
+  {#if quit}<div class="notice" role="status">eyepiece-pc has quit. You can close this tab.</div>{/if}
   {#if resetUndo}<div class="notice">
       Settings reset. <button class="secondary" onclick={undoReset}>Undo</button>
     </div>{/if}
@@ -461,6 +484,17 @@
 </main>
 
 <style>
+  .header-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: 0;
+  }
+  .quit-button {
+    padding: 6px 12px;
+  }
   .shell {
     max-width: 1500px;
     margin: auto;
