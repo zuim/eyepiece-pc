@@ -23,9 +23,11 @@
     workerConnected,
     kmsOutputs,
     listingKmsOutputs,
+    pickingFile,
     send,
     changeSetting,
     discoverKmsOutputs,
+    browseVideoFile,
   }: {
     schema: Schema | undefined;
     values: Record<string, unknown>;
@@ -34,9 +36,11 @@
     workerConnected: boolean;
     kmsOutputs: string[];
     listingKmsOutputs: boolean;
+    pickingFile: boolean;
     send: (command: RpcCommand) => Promise<boolean>;
     changeSetting: (setting: Setting, value: unknown) => Promise<void>;
     discoverKmsOutputs: () => Promise<void>;
+    browseVideoFile: () => Promise<void>;
   } = $props();
 
   const videoSettings = ["encoder", "codec", "bitrate", "fps"];
@@ -69,9 +73,6 @@
       <h2>Stream Controls</h2>
     </div>
     <div class="control-actions">
-      <button class="secondary" disabled={!running} onclick={() => send({ forceIdr: {} })}
-        ><Icon name="keyframe" /> Request Keyframe</button
-      >
       <div class="stream-state-control" class:restart-pending={settingsChanged} role="group" aria-label="Stream state">
         <button
           class:danger={running}
@@ -129,6 +130,22 @@
                     onclick={discoverKmsOutputs}
                   >
                     {listingKmsOutputs ? "Listing…" : "Discover"}
+                  </button>
+                </div>
+              </label>
+            {:else if sourceField === "input"}
+              <label
+                ><span>{titleCase(sourceParameter.description)}</span>
+                <div class="file-picker">
+                  <input
+                    aria-label="Video file"
+                    type="text"
+                    placeholder="Path to a video file"
+                    value={currentSetting(sourceField, values)}
+                    onchange={(event) => changeSetting(sourceParameter, event.currentTarget.value)}
+                  />
+                  <button class="secondary" disabled={!workerConnected || pickingFile} onclick={browseVideoFile}>
+                    {pickingFile ? "Choosing…" : "Browse…"}
                   </button>
                 </div>
               </label>
@@ -316,15 +333,18 @@
     font-size: 13px;
     font-weight: 400;
   }
-  .kms-output-picker {
+  .kms-output-picker,
+  .file-picker {
     display: flex;
     min-width: 0;
     gap: 6px;
   }
-  .kms-output-picker select {
+  .kms-output-picker select,
+  .file-picker input {
     flex: 1;
   }
-  .kms-output-picker button {
+  .kms-output-picker button,
+  .file-picker button {
     padding: 8px;
     white-space: nowrap;
   }
@@ -367,7 +387,6 @@
     .control-actions {
       width: 100%;
     }
-    .control-actions > button,
     .stream-state-control {
       flex: 1 1 150px;
     }

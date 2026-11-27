@@ -22,7 +22,7 @@
   import { OptimisticSettings } from "$lib/optimistic-settings";
   import { PaneDragThrottle } from "$lib/pane-drag-throttle";
   import type { Pose } from "$lib/pose-model";
-  import { metricValues, previewCommand, propertyValue, wireValue, type RpcCommand, type RpcResponse } from "$lib/rpc";
+  import { metricValues, pickVideoFile, previewCommand, propertyValue, wireValue, type RpcCommand, type RpcResponse } from "$lib/rpc";
   import { appendSample, summarizeWindow, type MetricSample } from "$lib/telemetry";
   import {
     defaultPreferences,
@@ -54,6 +54,7 @@
   let previewSubscribing = $state(false);
   let kmsOutputs = $state.raw<string[]>([]);
   let listingKmsOutputs = $state(false);
+  let pickingFile = $state(false);
   let pose = $state.raw<Pose | null>(null);
   let latest = $state.raw<Metrics>({});
   let samples = $state.raw<MetricSample[]>([]);
@@ -169,6 +170,20 @@
       await send({ listKmsOutputs: {} });
     } finally {
       listingKmsOutputs = false;
+    }
+  }
+
+  async function browseVideoFile() {
+    const setting = findSetting(schema, "input");
+    if (!setting || pickingFile) return;
+    pickingFile = true;
+    try {
+      const path = await pickVideoFile();
+      if (path) await changeSetting(setting, path);
+    } catch (error) {
+      statusMessage = `Cannot choose a file: ${errorMessage(error)}`;
+    } finally {
+      pickingFile = false;
     }
   }
 
@@ -373,9 +388,11 @@
     {workerConnected}
     {kmsOutputs}
     {listingKmsOutputs}
+    {pickingFile}
     {send}
     {changeSetting}
     {discoverKmsOutputs}
+    {browseVideoFile}
   />
 
   <nav class="tabs" aria-label="Workspace Sections">

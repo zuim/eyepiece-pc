@@ -2,7 +2,7 @@
   let {
     name,
   }: {
-    name: "play" | "pause" | "stop" | "recenter" | "keyframe" | "pin" | "copy" | "trash" | "restart";
+    name: "play" | "pause" | "stop" | "recenter" | "pin" | "copy" | "trash" | "restart";
   } = $props();
 </script>
 
@@ -21,7 +21,6 @@
   {:else if name === "recenter"}<circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" /><path
       d="M12 2v3M12 19v3M2 12h3M19 12h3"
     />
-  {:else if name === "keyframe"}<circle cx="8" cy="12" r="4" /><path d="M12 12h9m-3 0v3m-3-3v2" />
   {:else if name === "pin"}<path d="M9 3h6l-1 6 3 3v2H7v-2l3-3zM12 14v7" />
   {:else if name === "copy"}<rect x="8" y="8" width="11" height="11" rx="2" /><path
       d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"

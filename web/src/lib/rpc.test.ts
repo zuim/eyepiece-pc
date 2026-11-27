@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eyepiece } from "./generated/eyepiece-rpc.js";
-import { metricValues, previewCommand, propertyValue, RpcClient, wireValue } from "./rpc";
+import { metricValues, pickVideoFile, previewCommand, propertyValue, RpcClient, wireValue } from "./rpc";
 
 describe("preview codec negotiation", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -225,5 +225,34 @@ describe("wire values", () => {
     expect(() => wireValue({})).toThrow("Unsupported");
     const decoded = eyepiece.rpc.v1.Value.decode(eyepiece.rpc.v1.Value.encode(wireValue("x")).finish());
     expect(propertyValue(decoded as never)).toBe("x");
+  });
+});
+
+describe("video file dialog", () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  it("sends the session token and returns the chosen path or null", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/session") return json({ token: "secret" });
+      expect(new Headers(init?.headers).get("x-eyepiece-token")).toBe("secret");
+      return json({ path: "C:\Videos\clip.mkv" });
+    });
+    await expect(pickVideoFile(fetcher as typeof fetch)).resolves.toBe("C:\Videos\clip.mkv");
+    fetcher.mockImplementation(async (input: RequestInfo | URL) =>
+      input === "/api/session" ? json({ token: "secret" }) : json({ path: null }),
+    );
+    await expect(pickVideoFile(fetcher as typeof fetch)).resolves.toBeNull();
+  });
+
+  it("reports dialog failures", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) =>
+      input === "/api/session" ? json({ token: "t" }) : json({ error: "no file dialog available" }),
+    );
+    await expect(pickVideoFile(fetcher as typeof fetch)).rejects.toThrow("no file dialog available");
+    fetcher.mockImplementation(async (input: RequestInfo | URL) =>
+      input === "/api/session" ? json({ token: "t" }) : new Response("Forbidden", { status: 403 }),
+    );
+    await expect(pickVideoFile(fetcher as typeof fetch)).rejects.toThrow("403");
   });
 });
