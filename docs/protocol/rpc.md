@@ -194,3 +194,9 @@ The server binds to loopback only. It checks the `Host` header on every request 
 requires the per-process token for the upgrade. These controls reduce cross-site and DNS
 rebinding attacks. They are **not** user authentication: do not expose the port to
 untrusted users. `EYEP_DEV_ORIGIN` adds one localhost origin for the Vite dev server.
+
+Two plain HTTP endpoints sit beside the RPC. `/api/hello` (GET and its OPTIONS preflight) only names the
+program, its version and the UI address, readable cross-origin by the discovery origins of the
+[web UI](../web-ui.md#discovery-from-tinkerglass). `/api/pick-file` shows the system file dialog on the PC and
+returns the chosen path; it needs the token in an `x-eyepiece-token` header (which a foreign site cannot send
+without a preflight that is never answered), refuses cross-site requests and allows one dialog at a time.
