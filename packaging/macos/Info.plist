@@ -4,6 +4,7 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>eyepiece-pc</string>
+    <key>LSUIElement</key><true/>
     <key>CFBundleIdentifier</key><string>org.zuim.eyepiece-pc</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Eyepiece</string>

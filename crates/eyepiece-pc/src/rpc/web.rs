@@ -53,6 +53,7 @@ struct App {
     previews: broadcast::Sender<Response>,
     next_client: Arc<AtomicU64>,
     picking: Arc<AtomicBool>,
+    shutdown: Arc<Notify>,
 }
 
 enum ClientInput {
@@ -215,18 +216,33 @@ async fn hello(State(app): State<App>, method: axum::http::Method, headers: Head
     response
 }
 
+/// A request from eyepiece-pc's own page: the session token in `x-eyepiece-token` (a header other
+/// sites cannot send without a preflight we never answer) and no cross-site origin.
+fn own_page(app: &App, headers: &HeaderMap) -> bool {
+    let token_ok = headers
+        .get("x-eyepiece-token")
+        .is_some_and(|token| token.len() == app.token.len() && bool::from(token.as_bytes().ct_eq(app.token.as_bytes())));
+    let site_ok = headers.get("sec-fetch-site").is_none_or(|value| value == "same-origin")
+        && (!headers.contains_key(header::ORIGIN) || allowed_header(headers, header::ORIGIN, &app.origins));
+    token_ok && site_ok
+}
+
+/// The web UI's Quit: stops the stream and the server, like Ctrl-C or the tray icon's Quit.
+async fn quit(State(app): State<App>, headers: HeaderMap) -> HttpResponse {
+    if !own_page(&app, &headers) {
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    }
+    app.shutdown.notify_one();
+    ([(header::CACHE_CONTROL, "no-store")], Json(serde_json::json!({ "quitting": true }))).into_response()
+}
+
 /// The web UI's "Browse" for the video file: the page and eyepiece-pc run on the same computer
 /// (loopback only), so eyepiece-pc shows the system's file dialog and returns the chosen path,
 /// which the page then sets as the `input` setting. A browser file input cannot do this: it never
 /// reveals the path, and uploading would copy a whole video. Needs the session token in
 /// `x-eyepiece-token` (a header other sites cannot send without a preflight we never answer).
 async fn pick_file(State(app): State<App>, headers: HeaderMap) -> HttpResponse {
-    let token_ok = headers
-        .get("x-eyepiece-token")
-        .is_some_and(|token| token.len() == app.token.len() && bool::from(token.as_bytes().ct_eq(app.token.as_bytes())));
-    let site_ok = headers.get("sec-fetch-site").is_none_or(|value| value == "same-origin")
-        && (!headers.contains_key(header::ORIGIN) || allowed_header(&headers, header::ORIGIN, &app.origins));
-    if !token_ok || !site_ok {
+    if !own_page(&app, &headers) {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
     if app.picking.swap(true, Ordering::AcqRel) {
@@ -644,45 +660,8 @@ pub(super) fn run(startup: Startup, options: WebOptions) -> Result<(), WebError>
         thread::spawn(move || read_keys(input, shutdown));
     }
     let tray_exit = Arc::new(AtomicBool::new(false));
-    #[cfg(windows)]
-    let tray = options.tray.then(|| {
-        let input = input_tx.clone();
-        let mut events = events.subscribe();
-        let shutdown = shutdown.clone();
-        let exit = tray_exit.clone();
-        let url = url.clone();
-        thread::spawn(move || {
-            let send = |command| {
-                let _ = input.send(Input::Request(Request { id: String::new(), command: Some(command) }));
-            };
-            send(request::Command::GetState(wire::GetState {}));
-            let act = |action| match action {
-                crate::tray::Action::Open => {
-                    if let Err(e) = crate::desktop::open_url(&url) {
-                        crate::desktop::error_box(&e);
-                    }
-                }
-                crate::tray::Action::Start => send(request::Command::Start(wire::Start {})),
-                crate::tray::Action::Stop => send(request::Command::Stop(wire::Stop {})),
-                crate::tray::Action::Quit => shutdown.notify_one(),
-            };
-            let mut phase = || {
-                let mut latest = None;
-                loop {
-                    match events.try_recv() {
-                        Ok(Response { event: Some(response::Event::State(state)), .. }) => latest = Some(state.phase),
-                        Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => {}
-                        Err(_) => return latest,
-                    }
-                }
-            };
-            if let Err(e) = crate::tray::run(&act, &mut phase, &exit) {
-                // without the icon there is no way to quit a windowless process
-                crate::desktop::error_box(&format!("{e}; eyepiece-pc stops"));
-                shutdown.notify_one();
-            }
-        })
-    });
+    #[cfg(feature = "tray")]
+    let tray = options.tray.then(|| (input_tx.clone(), events.subscribe(), shutdown.clone(), url.clone()));
     let app = App {
         token: token.into(),
         hosts: Arc::new(hosts),
@@ -694,12 +673,14 @@ pub(super) fn run(startup: Startup, options: WebOptions) -> Result<(), WebError>
         previews,
         next_client: Arc::new(AtomicU64::new(1)),
         picking: Arc::new(AtomicBool::new(false)),
+        shutdown: shutdown.clone(),
     };
     let router = Router::new()
         .route("/api/session", get(session))
         .route("/api/rpc", get(upgrade))
         .route("/api/hello", get(hello).options(hello))
         .route("/api/pick-file", get(pick_file))
+        .route("/api/quit", get(quit))
         .fallback_service(ServeDir::new(site))
         .layer(middleware::from_fn_with_state(app.clone(), protect))
         .with_state(app);
@@ -712,36 +693,82 @@ pub(super) fn run(startup: Startup, options: WebOptions) -> Result<(), WebError>
             eprintln!("[eyepiece-pc] {e}");
         }
     }
-    let result = runtime.block_on(async {
-        tokio::select! {
-            result = axum::serve(listener, router).into_future() => {
-                result.map_err(|e| format!("RPC server: {e}"))
+    let exit = tray_exit.clone();
+    let serve = move || -> Result<(), WebError> {
+        let result = runtime.block_on(async {
+            tokio::select! {
+                result = axum::serve(listener, router).into_future() => {
+                    result.map_err(|e| format!("RPC server: {e}"))
+                }
+                result = tokio::signal::ctrl_c() => {
+                    result.map_err(|e| format!("RPC shutdown signal: {e}"))
+                }
+                () = shutdown.notified() => Ok(()),
+                result = worker_done => {
+                    Err(result.ok().flatten().unwrap_or_else(|| "RPC worker stopped unexpectedly".into()))
+                }
             }
-            result = tokio::signal::ctrl_c() => {
-                result.map_err(|e| format!("RPC shutdown signal: {e}"))
-            }
-            () = shutdown.notified() => Ok(()),
-            result = worker_done => {
-                Err(result.ok().flatten().unwrap_or_else(|| "RPC worker stopped unexpectedly".into()))
+        });
+        exit.store(true, Ordering::Relaxed);
+        let _ = input_tx.send(Input::Closed);
+        drop(input_tx);
+        drop(runtime);
+        request_thread
+            .join()
+            .map_err(|_| "RPC request thread panicked".to_string())?;
+        worker.join().map_err(|_| "RPC worker panicked".to_string())??;
+        output_thread
+            .join()
+            .map_err(|_| "RPC output thread panicked".to_string())?;
+        Ok(result?)
+    };
+    // the icon runs on this thread (macOS: it must be the main thread), the server beside it
+    #[cfg(feature = "tray")]
+    if let Some((input, events, shutdown, url)) = tray {
+        let server = thread::spawn(serve);
+        run_tray(input, events, &shutdown, &url, &tray_exit);
+        return server.join().map_err(|_| WebError::Other("RPC server thread panicked".into()))?;
+    }
+    serve()
+}
+
+/// The tray icon until Quit (which stops the server) or the server's end. Without an icon (no
+/// tray host, an error) eyepiece-pc keeps running: the web UI has Quit too.
+#[cfg(feature = "tray")]
+fn run_tray(
+    input: mpsc::Sender<Input>,
+    mut events: broadcast::Receiver<Response>,
+    shutdown: &Notify,
+    url: &str,
+    exit: &AtomicBool,
+) {
+    let send = |command| {
+        let _ = input.send(Input::Request(Request { id: String::new(), command: Some(command) }));
+    };
+    send(request::Command::GetState(wire::GetState {}));
+    let act = |action| match action {
+        crate::tray::Action::Open => {
+            if let Err(e) = crate::desktop::open_url(url) {
+                crate::desktop::error_box(&e);
             }
         }
-    });
-    tray_exit.store(true, Ordering::Relaxed);
-    let _ = input_tx.send(Input::Closed);
-    drop(input_tx);
-    drop(runtime);
-    #[cfg(windows)]
-    if let Some(tray) = tray {
-        tray.join().map_err(|_| "tray thread panicked".to_string())?;
+        crate::tray::Action::Start => send(request::Command::Start(wire::Start {})),
+        crate::tray::Action::Stop => send(request::Command::Stop(wire::Stop {})),
+        crate::tray::Action::Quit => shutdown.notify_one(),
+    };
+    let mut phase = || {
+        let mut latest = None;
+        loop {
+            match events.try_recv() {
+                Ok(Response { event: Some(response::Event::State(state)), .. }) => latest = Some(state.phase),
+                Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => {}
+                Err(_) => return latest,
+            }
+        }
+    };
+    if let Err(e) = crate::tray::run(&act, &mut phase, exit) {
+        eprintln!("[eyepiece-pc] no tray icon ({e}); quit from the web UI");
     }
-    request_thread
-        .join()
-        .map_err(|_| "RPC request thread panicked".to_string())?;
-    worker.join().map_err(|_| "RPC worker panicked".to_string())??;
-    output_thread
-        .join()
-        .map_err(|_| "RPC output thread panicked".to_string())?;
-    Ok(result?)
 }
 
 /// The terminal's view of a web UI run: log lines, errors and stream phase changes.

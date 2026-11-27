@@ -28,7 +28,7 @@ web UI's RPC.
 - USB through tinkerglass's own video interface (WinUSB on Windows, no driver step), or `adb forward` as the
   fallback.
 - A local browser UI (always running alongside, `--open-web` opens it) with live settings, statistics, head-pose
-  view and stream preview; on Windows a double-click start puts eyepiece-pc in the notification area.
+  view and stream preview; a desktop start (double-click, Finder, the AppImage) adds a tray icon.
 - Many settings change live without restarting the stream, and a stream that was running resumes when the
   web UI server restarts; `--reconnect` rides out a link drop.
 
@@ -47,8 +47,9 @@ eyepiece-pc --no-web              # plain command line: no web UI, nothing saved
 
 `eyepiece-pc` starts the bridge on the goggles by itself. Everything is experimental: **never use it while flying.**
 
-On Windows, double-clicking `eyepiece-pc.exe` opens the web UI in the browser and leaves an icon in the
-notification area (click: open the web UI; right-click: start or stop the stream, quit).
+Started from the desktop (double-clicking `eyepiece-pc.exe`, the macOS app, the AppImage), eyepiece-pc opens the web
+UI in the browser and shows a tray icon (open the web UI, start or stop the stream, quit) instead of streaming at
+once. The web UI has a Quit button in every mode.
 
 ## Known issues
 

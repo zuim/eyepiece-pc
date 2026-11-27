@@ -27,10 +27,10 @@ pub fn open_url(url: &str) -> Result<(), String> {
     }
 }
 
-/// Whether the process was started without a terminal of its own: on Windows, a console that
-/// holds only this process was created for it (a double-click in Explorer or a shortcut).
-/// Elsewhere programs started from a desktop get no console window, so this is always false
-/// and the tray is not offered.
+/// Whether the process was started from the desktop rather than a terminal. Windows: a console
+/// that holds only this process was created for it (a double-click in Explorer, a shortcut).
+/// macOS: the app bundle's binary without a terminal (Finder, the Dock). Linux: an AppImage
+/// without a terminal (a file manager); the desktop file passes `--desktop` itself.
 pub fn started_from_desktop() -> bool {
     #[cfg(windows)]
     {
@@ -42,7 +42,14 @@ pub fn started_from_desktop() -> bool {
     }
     #[cfg(not(windows))]
     {
-        false
+        use std::io::IsTerminal;
+        let terminal = std::io::stdin().is_terminal() || std::io::stderr().is_terminal();
+        let packaged = if cfg!(target_os = "macos") {
+            std::env::current_exe().is_ok_and(|exe| exe.to_string_lossy().contains(".app/Contents/MacOS/"))
+        } else {
+            std::env::var_os("APPIMAGE").is_some()
+        };
+        packaged && !terminal
     }
 }
 
@@ -64,7 +71,18 @@ pub fn error_box(message: &str) {
         unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR) };
     }
     #[cfg(not(windows))]
-    eprintln!("[eyepiece-pc] {message}");
+    {
+        eprintln!("[eyepiece-pc] {message}");
+        // best effort: nobody may see stderr after a desktop start
+        let _ = if cfg!(target_os = "macos") {
+            let quoted = message.replace('\\', "\\\\").replace('"', "\\\"");
+            std::process::Command::new("osascript")
+                .args(["-e", &format!("display alert \"eyepiece-pc\" message \"{quoted}\" as critical")])
+                .status()
+        } else {
+            std::process::Command::new("zenity").args(["--error", "--title=eyepiece-pc", "--text", message]).status()
+        };
+    }
 }
 
 /// Ask for a video file with the system's file dialog. The web UI runs on the same computer as

@@ -7,9 +7,12 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["x11", "pipewire"]
+default = ["x11", "pipewire", "tray"]
 x11 = ["eyepiece-capture/x11"]
 pipewire = ["eyepiece-capture/pipewire"]
+# the notification-area / menu-bar icon of a desktop start (Linux: StatusNotifierItem over D-Bus,
+# pure Rust, no GTK)
+tray = ["dep:tray-icon", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation"]
 
 [dependencies]
 clap = { version = "4", features = ["derive", "wrap_help"] }
@@ -29,13 +32,23 @@ eyepiece-av = { path = "../eyepiece-av" }
 eyepiece-capture = { path = "../eyepiece-capture", default-features = false }
 eyepiece-link = { path = "../eyepiece-link" }
 
-# the tray icon, the console check and the file dialog (Windows only)
+# the console check, the file dialog and the error box
 [target.'cfg(windows)'.dependencies]
-tray-icon = { version = "0.27", default-features = false }
+tray-icon = { version = "0.27", default-features = false, optional = true }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_UI_Controls_Dialogs",
     "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tray-icon = { version = "0.27", default-features = false, features = ["ksni"], optional = true }
+
+# the tray needs the application event loop on the main thread
+[target.'cfg(target_os = "macos")'.dependencies]
+tray-icon = { version = "0.27", default-features = false, optional = true }
+objc2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSResponder", "NSRunningApplication"], optional = true }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDate", "NSObjCRuntime", "NSRunLoop", "NSString"], optional = true }
 
 [[bin]]
 name = "eyepiece-pc"
