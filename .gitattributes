@@ -1,0 +1,9 @@
+# LF in the repository and in every checkout, on every OS, whatever core.autocrlf says
+* text=auto eol=lf
+# Windows command scripts need CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# binary
+*.png binary
+*.ico binary
