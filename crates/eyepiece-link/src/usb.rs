@@ -142,11 +142,8 @@ pub fn open(serial: Option<&str>, want: TgInterface) -> Result<UsbDevice, String
         .wait()
         .map_err(|e| {
             if claim_denied(&e) {
-                format!(
-                    "the goggles' {} is in use by another program (a second eyepiece-pc, or another \
-                     USB client): close it and try again ({e})",
-                    want.name()
-                )
+                // an adb server never holds it (it claims only the ADB interface)
+                format!("the goggles' {} is in use by another program", want.name())
             } else {
                 format!("cannot claim the {} {} ({e})", want.name(), candidate.interface_number)
             }
