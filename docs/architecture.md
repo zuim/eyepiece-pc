@@ -4,7 +4,7 @@
  KMS plane / PipeWire / X11 / DXGI ──► convert (GPU: scale, letterbox, NV12) ──► encode (NVENC/VAAPI/…)
         stamped at PC vblank               stage A thread                          stage B thread
                                                                                        │ Annex-B AU, pts = capture time
- opentrack UDP ◄── pose ◄──────── Eyepiece protocol (adb forward tcp:42420) ◄──────────┘──► eyepiece_bridge
+ opentrack UDP ◄── pose ◄──────── Eyepiece protocol (adb forward tcp:42420) ◄──────────┘──► pcdisplay_bridge
 ```
 
 ## Design and latency

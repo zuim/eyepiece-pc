@@ -54,20 +54,16 @@ pub const SBS_EYE_W: u32 = 1280;
 pub const SBS_EYE_H: u32 = 720;
 /// ep_info_t.flags: the bridge understands EP_LAYOUT_SBS.
 pub const EP_INFO_STEREO: u32 = 0x01;
-pub const EP_INFO_PANE_NV12: u32 = 0x02;
 pub const EP_INFO_PANE_BGRA: u32 = 0x04;
 pub const EP_INFO_PANE_OPAQUE_BGRA: u32 = 0x08;
-pub const EP_INFO_PANE_RECONNECT: u32 = 0x10;
 pub const EP_INFO_RECONFIG: u32 = 0x20;
 pub const EP_INFO_GUI_ALPHA: u32 = 0x40;
-pub const EP_INFO_GUI_ALPHA_ACTIVE: u32 = 0x80;
 pub const EP_INFO_PANE_ALPHA: u32 = 0x100;
 
 /// Output pane format. Bgra packs color and grayscale alpha side by side;
 /// OpaqueBgra uses normal-width color video. Both use limited-range BT.709.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneFormat {
-    Nv12,
     Bgra,
     OpaqueBgra,
 }
@@ -85,7 +81,6 @@ impl Pane {
     /// Validate against the advertised panel and capabilities before sending.
     pub fn payload(self, info: Info) -> Result<wire::Pane, &'static str> {
         let capability = match self.format {
-            PaneFormat::Nv12 => EP_INFO_PANE_NV12,
             PaneFormat::Bgra => EP_INFO_PANE_BGRA,
             PaneFormat::OpaqueBgra => EP_INFO_PANE_OPAQUE_BGRA,
         };
@@ -100,13 +95,12 @@ impl Pane {
         }
         Ok(wire::Pane {
             x: self.x.into(), y: self.y.into(), width: self.width.into(), height: self.height.into(),
-            format: match self.format { PaneFormat::Nv12 => 0, PaneFormat::Bgra => 1, PaneFormat::OpaqueBgra => 2 },
+            format: match self.format { PaneFormat::Bgra => 1, PaneFormat::OpaqueBgra => 2 },
         })
     }
 
     pub fn encoded_size(self) -> Result<(u16, u16), &'static str> {
         let width = match self.format {
-            PaneFormat::Nv12 => self.width,
             PaneFormat::Bgra => self.width.checked_mul(2).ok_or("packed pane width overflows")?,
             PaneFormat::OpaqueBgra => self.width,
         };

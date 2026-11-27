@@ -1,6 +1,6 @@
 # Bridge protocol (PC ↔ goggles)
 
-The bridge protocol connects `eyepiece-pc` to `eyepiece_bridge` on the goggles. It
+The bridge protocol connects `eyepiece-pc` to the bridge on the goggles (`pcdisplay_bridge` of tinkerglass's PC Display mod; the natartos-era `eyepiece_bridge` speaks the same protocol). It
 carries encoded video to the goggles and head pose, timing and display
 feedback back. This page is the behavioural specification;
 [`contract/eyepiece-rpc.proto`](../../contract/eyepiece-rpc.proto) is the canonical
@@ -34,7 +34,7 @@ byte stream.
 | Transport | Address | Notes |
 |---|---|---|
 | TCP | `127.0.0.1:42420` on the goggles | Reached through `adb forward tcp:42420 tcp:42420`, the default. `-A` listens on all interfaces for a directly reachable bridge (`--host`). |
-| USB bulk | FunctionFS interface `ffs.eyepiece` | Bridge started with `-B`; experimental. See [transports](../transports.md). |
+| USB bulk | vendor interface of the goggles' USB mode | tinkerglass: interface class/subclass/protocol `ff/54/03` ("tinkerglass video"), one bulk OUT and one bulk IN endpoint, no bridge option; the natartos bridge used its own `ffs.eyepiece` interface with `-B`. See [transports](../transports.md). |
 
 Every record is:
 
@@ -133,7 +133,8 @@ was started:
 |---|---|
 | `-1` | the bridge exits |
 | `-b` only (menu launch) | the bridge keeps running and waits. A decoder that is already open on VIDEO0 stays open, so the next client must send the same configuration (anything else is status 3). GFX1 is unavailable in this mode. |
-| `-R` | the bridge keeps running and **retains** a GFX1 pane: its last frame stays on screen and the active configuration is kept, so the next client can resume it or replace it |
+
+Nothing of a connection is kept for the next one: the stream, the pane and the GUI opacity end with it.
 
 ### PC view
 
@@ -145,13 +146,13 @@ configured state.
 ```mermaid
 sequenceDiagram
     participant PC as eyepiece-pc
-    participant B as eyepiece_bridge
+    participant B as bridge
     B->>PC: Info (version, panel, capabilities)
-    PC->>B: GuiAlpha(id 1)
+    PC->>B: GuiAlpha(id 1)  [GUI opacity other than 0 only]
     B->>PC: GuiAlphaAck(id 1, 0)
     PC->>B: Configure(id 2, codec, layout, pane?)
     B->>PC: ConfigureAck(id 2, 0)
-    PC->>B: PaneAlpha(id 3)  [pane only]
+    PC->>B: PaneAlpha(id 3)  [pane opacity other than 100 % only]
     B->>PC: PaneAlphaAck(id 3, 0)
     PC->>B: Video (keyframe)
     B->>PC: Frame (pts echoed)
@@ -207,7 +208,7 @@ Status **3, unsupported**, nothing changed:
 
 - the bridge runs without video (`-V`);
 - a pane is requested but the bridge is not in a GFX1-capable mode (it needs
-  `-1` or `-R`, hardware decode on VOP0, a 1920×1080 panel and no stereo override), or
+  `-1`, hardware decode on VOP0, a 1920×1080 panel and no stereo override), or
   `dji_arhome` could not be stopped for GFX1;
 - stereo is requested but the bridge has no direct VOP output;
 - a decoder on the VIDEO0 plane is already open and the request differs from the active
@@ -249,10 +250,8 @@ Opacity values are **not** affected by `Configure`; see [Opacity](#opacity).
 
 `eyepiece-pc` builds one `StreamConfig` for the session and sends it at connect and on
 every live pane change. It currently always configures a pane (the whole panel, opaque, by
-default); the no-pane and stereo forms are part of the protocol for other clients. It also sends it again on reconnect, which is how a retained
-`-R` session resumes. A reconnect with a different pane or codec simply replaces the
-retained configuration; the last image may disappear while the new decoder starts.
-A live change makes the encoder and the bridge switch together:
+default); the no-pane and stereo forms are part of the protocol for other clients. A reconnect starts a new
+connection and sends it again. A live change makes the encoder and the bridge switch together:
 
 1. the capture stage prepares the new converter and a first frame;
 2. the encode stage opens the new encoder and calls `configure` (5 s timeout);
@@ -297,28 +296,31 @@ on demand from the user or RPC. Requests are rate-limited to one per 250 ms.
 Two independent opacities exist, both acknowledged and both with an ID.
 
 ```proto
-message GuiAlpha  { uint32 alpha = 2; }   // 0..255, DJI GUI plane
+message GuiAlpha  { uint32 alpha = 2; }   // 0..255, the goggles' UI (GUI plane)
 message PaneAlpha { uint32 alpha = 1; }   // 0..255, GFX1 pane
 message Acknowledgement { uint32 status = 2; }
 ```
 
 | Request | 0 | 1 | 2 |
 |---|---|---|---|
-| `GuiAlpha` | applied | alpha > 255 | the overlay mod could not apply it |
+| `GuiAlpha` | applied | alpha > 255 | the bridge holds no display lease (`-V`), or the display service refused it |
 | `PaneAlpha` | applied | alpha > 255 | no pane is active, or the display refused it |
 
-- `GuiAlpha` needs the overlay mod and `CAPABILITY_GUI_ALPHA`. It is acknowledged only
-  after the display API has succeeded. Fullscreen GUI hiding takes precedence.
+- `GuiAlpha` needs `CAPABILITY_GUI_ALPHA`. A connection starts at 0: the goggles' UI is hidden and gets no
+  buttons. Above 0, tinkerglass's display service shows the UI at that opacity above the video and the pane, and
+  the UI gets the buttons except the ones the bridge uses while no UI menu is open (OK recenters head tracking;
+  Back ends a bridge started from the menu). It is acknowledged after the display service applied it. The PC
+  sends it only for an opacity other than 0.
 - `PaneAlpha` needs `CAPABILITY_PANE_ALPHA`. It multiplies decoded pixel alpha by
   `alpha / 255`, with rounding. For opaque panes it is the hardware global alpha; for
-  packed alpha it multiplies the reconstructed per-pixel alpha. It applies to the retained
-  frame and to future frames without restarting the decoder.
+  packed alpha it multiplies the reconstructed per-pixel alpha. It applies to the frame on
+  screen and to future frames without restarting the decoder.
 - A `PaneAlpha` sent while the connection is unconfigured, or while the active
   configuration has no pane, is acknowledged with status 2.
-- The accepted pane opacity is **kept across `Configure`**. Reconnecting clients send
-  their desired opacity explicitly; the PC does so right after each acknowledged
+- The accepted pane opacity is **kept across `Configure`** within a connection. A connection
+  starts fully opaque; the PC sends another value right after the first acknowledged
   `Configure` that has a pane.
-- GUI opacity is released when the client disconnects, unless a `-R` pane is retained.
+- Both opacities end with the connection.
 
 ## Telemetry and clock sync
 
@@ -399,15 +401,15 @@ it names; the PC does.
 
 | Flag | Value | Meaning |
 |---|---:|---|
-| `CAPABILITY_STEREO` | `0x001` | Side-by-side stereo layout is possible (direct VOP output). |
-| `CAPABILITY_PANE_NV12` | `0x002` | Reserved; never advertised. |
+| `CAPABILITY_STEREO` | `0x001` | Side-by-side stereo layout is possible now: direct VOP output, and no mono decoder open yet (a menu-started bridge has one for its waiting screen). |
 | `CAPABILITY_PANE_BGRA` | `0x004` | Packed-alpha pane (`format 1`). |
 | `CAPABILITY_PANE_OPAQUE_BGRA` | `0x008` | Opaque pane (`format 2`). |
-| `CAPABILITY_PANE_RECONNECT` | `0x010` | The bridge was started with `-R` and retains a pane across clients. |
 | `CAPABILITY_RECONFIG` | `0x020` | A later `Configure` may replace a running GFX1 stream. Without it, only the first `Configure` of a connection is accepted by the PC. |
-| `CAPABILITY_GUI_ALPHA` | `0x040` | `GuiAlpha` is supported (overlay mod present). |
-| `CAPABILITY_GUI_ALPHA_ACTIVE` | `0x080` | A GUI opacity request is currently retained; the PC must apply its own value. |
+| `CAPABILITY_GUI_ALPHA` | `0x040` | `GuiAlpha` is supported (the bridge holds tinkerglass's display lease). |
 | `CAPABILITY_PANE_ALPHA` | `0x100` | `PaneAlpha` is supported. |
+
+Values `0x002`, `0x010` and `0x080` were used by earlier drafts (NV12 panes, panes kept across clients, a kept GUI
+opacity) and must not be reused.
 
 The bridge sets the pane flags together with `RECONFIG` and `PANE_ALPHA` only in a mode
 that can host GFX1. Flags above `0xff` were introduced after the first protocol version,
@@ -422,8 +424,8 @@ and PC builds older than that reject them.
 | `Configure` status 1 or 3 | acknowledged; active stream unchanged; connection stays open |
 | `Configure` status 2 | acknowledged, then the connection closes and the bridge exits |
 | Decoder open failure after an acknowledged `Configure` | closes the connection; a later `Configure` retries |
-| Display or backdrop failure while streaming, or 30 consecutive display rejections | the bridge logs it, closes the connection and exits; an isolated rejection only drops the frame |
-| Transport loss | the connection ends; with `-R` a pane stays on screen |
+| Display failure while streaming, or 30 consecutive display rejections | the bridge logs it, closes the connection and exits; an isolated rejection only drops the frame |
+| Transport loss | the connection ends and releases the display |
 
 There is no error message in this protocol. Anything the PC must act on is a status code
 in an acknowledgement or a closed connection.
@@ -432,7 +434,7 @@ in an acknowledgement or a closed connection.
 
 ```text
 bridge → Info{version 4, 1920×1080, hw decoder, flags 0x16d}
-pc     → GuiAlpha{255}            id 1
+pc     → GuiAlpha{128}            id 1
 bridge → GuiAlphaAck{0}           id 1
 pc     → Configure{h264, mono, pane{100,50,640,480,format 2}}   id 2
 bridge → ConfigureAck{0}          id 2

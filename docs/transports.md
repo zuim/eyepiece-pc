@@ -1,20 +1,25 @@
 # Transports and USB bulk transfers
 
-`eyepiece-pc` reaches the bridge either through `adb forward` (TCP on the PC's loopback) or over a dedicated USB
-bulk interface. The byte stream is the same; see the [bridge protocol](protocol/bridge.md#transports-and-framing).
-`--transport auto` (the default) tries USB bulk first and falls back to adb; `--transport adb` and
-`--transport usb-bulk` force one. On the goggles the bulk interface needs the bridge started with `-B`
-([goggles side](goggles/bridge.md#usb-bulk-transport)).
+`eyepiece-pc` reaches the bridge either over the goggles' tinkerglass video interface (USB bulk) or through
+`adb forward` (TCP on the PC's loopback). The byte stream is the same; see the
+[bridge protocol](protocol/bridge.md#transports-and-framing). `--transport auto` (the default) uses the USB
+interface when it is present and falls back to adb otherwise (for example in a stock USB configuration);
+`--transport adb` and `--transport usb-bulk` force one. The interface exists in tinkerglass's USB mode, which
+the goggles enter by themselves after the mods start; the bridge needs no option for it.
 
 ## USB bulk
 
-`--transport usb-bulk` selects the dedicated `Eyepiece bulk` interface without TCP
-fallback. `auto` attempts bulk before falling back to adb forwarding, and reconnects
-retain the initially selected transport. `--serial` selects the USB device.
+`--transport usb-bulk` selects the *tinkerglass video* interface without TCP fallback. `auto` attempts it
+before falling back to adb forwarding, and reconnects retain the initially selected transport. `--serial`
+selects the USB device.
 
-The host uses the pure-Rust `nusb` library. Linux needs device-scoped USB permissions;
-macOS needs the vendor interface free of other drivers; Windows needs WinUSB bound
-only to the Eyepiece interface, never the ADB interface.
+The interface is found by USB id 2CA3:0020 and interface class/subclass/protocol `ff/54/03`, never by its number;
+its one bulk OUT and one bulk IN endpoint are found by direction. The goggles are high-speed only (512-byte
+packets). The other tinkerglass interfaces (control, protocol 1 and 2) belong to the web app and are never
+opened. Only one program can hold the video interface: a second `eyepiece-pc` fails to claim it and says so.
+
+The host uses the pure-Rust `nusb` library. Windows binds WinUSB by itself (the interface carries a Microsoft OS
+descriptor), so no driver step is needed. Linux needs device-scoped USB permissions (a udev rule for 2CA3:0020).
 
 ### Troubleshooting
 
@@ -26,7 +31,7 @@ Automatic selection does not switch transports after a connection is made.
 
 The ignored hardware regression exercises pane movement, resizing, packed alpha,
 fullscreen/PiP transitions, GUI/pane opacity acknowledgements, resumed frame reports
-and reconnect. Start a matching bridge with `-R -H` (add `-B` for bulk); run
+and reconnect. Start a matching bridge (`pcdisplay_bridge -H`); run
 only with stationary goggles, never while flying:
 
 ```sh

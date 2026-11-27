@@ -1,15 +1,17 @@
 [package]
 name = "eyepiece-link"
-description = "Eyepiece wire protocol, connection to eyepiece_bridge, clock sync, stats, adb helpers (no FFmpeg)"
+description = "Eyepiece wire protocol, connection to pcdisplay_bridge, clock sync, stats, adb helpers (no FFmpeg)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-libc = "0.2"
 nusb = "0.2.9"
 prost = "0.13"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 prost-build = "0.13"

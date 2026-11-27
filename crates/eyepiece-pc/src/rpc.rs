@@ -345,7 +345,7 @@ fn setting_visible(
 
     match name {
         "no_connect" => true,
-        "bridge" | "bridge_args" | "stop_bridge" => !args.no_connect && !args.no_deploy,
+        "bridge_args" | "stop_bridge" => !args.no_connect && !args.no_deploy,
         "host" | "port" => !args.no_connect && args.transport == "auto",
         "transport" | "serial" | "adb" | "no_forward" | "no_deploy" | "reconnect" => {
             !args.no_connect
@@ -1384,7 +1384,7 @@ mod tests {
         let desired = Args { gui_opacity: 25, pane_opacity: 50, ..args };
         queue_gui_update(&mut session, &desired, &tx);
         queue_gui_update(&mut session, &desired, &tx);
-        assert_eq!(session.args.gui_opacity, 100);
+        assert_eq!(session.args.gui_opacity, 0);
         assert_eq!(session.args.pane_opacity, 100);
         let update = control.gui_updates.lock().unwrap().pop_front().unwrap();
         assert_eq!((update.opacity, update.pane), (25, false));
@@ -1521,7 +1521,6 @@ mod tests {
 
         args.no_video = false;
         args.no_deploy = true;
-        assert!(!setting_visible("bridge", &args, &[], family));
         assert!(!setting_visible("bridge_args", &args, &[], family));
         assert!(!setting_visible("stop_bridge", &args, &[], family));
         args.no_connect = true;

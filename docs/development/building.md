@@ -2,9 +2,10 @@
 
 ## Linux and the common setup
 
-With Nix, `nix build` builds the workspace binaries. The package supports Linux
-and Apple Silicon macOS; Intel macOS lacks a Swift 6 package in the pinned
-nixpkgs. `nix develop` provides a development shell.
+With Nix, `nix develop` opens a shell with the toolchain and libraries (Rust, FFmpeg, libclang,
+pkg-config, the Linux capture libraries or Swift and the macOS SDK, Node.js and pnpm). The build inside
+it is the regular one below; the flake defines no package of its own. Intel macOS lacks a Swift 6
+package in the pinned nixpkgs.
 
 Linux (Debian/Ubuntu package names; FFmpeg 9 headers, tested with 9.0.2):
 
@@ -27,16 +28,20 @@ Linux builds the CLI with KMS, X11 and (by default) PipeWire capture. See
 
 ## Windows
 
-Install LLVM (for libclang), unpack a BtbN FFmpeg 9 *shared* build
-(`ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip`), then
+Install once: [rustup](https://rustup.rs) (MSVC toolchain, with Visual Studio 2022 or its Build Tools,
+"Desktop development with C++"), [LLVM](https://github.com/llvm/llvm-project/releases) (libclang, found in
+`C:\Program Files\LLVM` by itself), Node.js 24 or newer for the web UI, and `adb` on `PATH`. Then:
 
 ```pwsh
-$env:FFMPEG_INCLUDE_DIR = "C:\ffmpeg\include"; $env:FFMPEG_LIB_DIR = "C:\ffmpeg\lib"
-$env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
-cargo build --release      # put C:\ffmpeg\bin (the DLLs) on PATH or next to the .exe
+cargo build --release                    # → target\release\eyepiece-pc.exe, FFmpeg DLLs next to it
+cd web; npx -y pnpm@10 install --frozen-lockfile; npx -y pnpm@10 build; cd ..   # → web\build
+target\release\eyepiece-pc.exe --web     # then open http://127.0.0.1:4174/
 ```
 
-The Windows (DXGI) path builds in CI but has never been run.
+FFmpeg needs no setup: the first build downloads the pinned BtbN FFmpeg 9 shared build (about 85 MB,
+sha256-checked; the same one CI uses) into `target\ffmpeg` and copies its DLLs next to the binaries and
+tests. To use another FFmpeg, set `FFMPEG_INCLUDE_DIR` and `FFMPEG_LIB_DIR`. Node.js 25 and later no
+longer ship corepack, hence `npx pnpm@10`.
 
 ## macOS
 
@@ -57,11 +62,11 @@ The suite does not touch a device or capture the screen. Tests that need hardwar
 
 ### Bridge interoperability tests
 
-The nanopb/prost interop tests require the sibling natartos checkout, nanopb 0.4.9.1
+The nanopb/prost interop tests require a checkout of tinkerglass (the PC Display bridge), nanopb 0.4.9.1
 source in `NANOPB_DIR`, `protoc`, `protoc-gen-nanopb`, a C compiler and Cargo:
 
 ```sh
-bridge=../natartos/mods/eyepiece/bridge
+bridge=../tinkerglass/mods/pcdisplay/bridge
 out=target/bridge-interop
 mkdir -p "$out"
 PYTHONPATH="${NANOPB_PYTHONPATH:-}${PYTHONPATH:+:$PYTHONPATH}" \
@@ -72,9 +77,9 @@ cc -std=gnu11 -I "$out" -I "$NANOPB_DIR" "$bridge/tests/wire_interop.c" "$bridge
 EYEPIECE_WIRE_INTEROP="$out/wire_interop" cargo test -p eyepiece-link --test bridge_interop -- --ignored
 ```
 
-The bridge's own protocol tests (configuration sequence, invalid video, nanopb wire format) live in the natartos
-repository under `mods/eyepiece/bridge/tests/` and run in its CI; they build the host bridge
-(`build.sh host`) and drive it with `-N -H -1` as a null-decoder protocol bridge.
+The bridge's own protocol tests (configuration sequence, invalid video, nanopb wire format) live in the tinkerglass
+repository under `mods/pcdisplay/bridge/tests/`; they build the host bridge
+(`build.sh host`, `pcdisplay_bridge_host`) and drive it with `-N -H -1` as a null-decoder protocol bridge.
 
 ### Hardware tests
 
