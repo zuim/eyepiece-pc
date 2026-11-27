@@ -2,6 +2,7 @@
   import { onMount, untrack } from "svelte";
   import type { eyepiece } from "$lib/generated/eyepiece-rpc.js";
   import ComparePanel from "$lib/components/ComparePanel.svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { errorHelp } from "$lib/error-help";
   import LogPanel from "$lib/components/LogPanel.svelte";
   import OverviewPanel from "$lib/components/OverviewPanel.svelte";
@@ -63,6 +64,7 @@
   let statusMessage = $state("");
   const statusHelp = $derived(errorHelp(statusMessage));
   let resetUndo = $state.raw<Record<string, unknown>>();
+  let confirmingReset = $state(false);
   let preferencesReady = $state(false);
   // Not rendered, so plain variables.
   let subscribedPreviewOn = false;
@@ -376,6 +378,13 @@
       </div>
       <button aria-label="Dismiss" onclick={() => (statusMessage = "")}>×</button>
     </div>{/if}
+  <ConfirmDialog
+    bind:open={confirmingReset}
+    title="Reset all settings?"
+    message="Every setting returns to its default. Settings that cannot change live apply when the stream restarts. You can undo this for 20 seconds."
+    confirmLabel="Reset Settings"
+    onConfirm={() => void resetSettings()}
+  />
   {#if resetUndo}<div class="notice">
       Settings reset. <button class="secondary" onclick={undoReset}>Undo</button>
     </div>{/if}
@@ -393,6 +402,7 @@
     {changeSetting}
     {discoverKmsOutputs}
     {browseVideoFile}
+    requestReset={() => (confirmingReset = true)}
   />
 
   <nav class="tabs" aria-label="Workspace Sections">
@@ -435,7 +445,9 @@
       {commandLine}
       {applyCommand}
       {copyText}
-      {resetSettings}
+      resetSettings={async () => {
+        confirmingReset = true;
+      }}
       {changeSetting}
       {changeAlphaSettings}
       changePaneDuringDrag={(value, mode) => paneDrag.update(value, mode)}

@@ -43,7 +43,8 @@ permission is already granted.
   charts.
 - **Compare** pins capture the running configuration and the mean telemetry over a chosen window.
 - **Settings** are grouped by function. The equivalent command line updates as settings change and can be
-  copied, or edited and applied; omitted options take their CLI defaults. *Reset* restores the web defaults and
+  copied, or edited and applied; omitted options take their CLI defaults. *Reset to Defaults* (also
+  *Reset Settings* beside the start button) asks for confirmation, restores the web defaults and
   can be undone for 20 seconds.
 - **Log** shows session and bridge log lines.
 
