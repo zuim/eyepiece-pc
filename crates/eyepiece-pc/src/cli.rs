@@ -106,6 +106,10 @@ pub struct Args {
     /// dxgi: adapter,output index
     #[arg(long, default_value = "0,0")]
     pub dxgi: String,
+    /// dxgi: draw the mouse pointer into the stream: auto (only when the captured image lacks it,
+    /// e.g. a hardware cursor) | on | off
+    #[arg(long, default_value = "auto", value_parser = ["auto", "on", "off"])]
+    pub dxgi_cursor: String,
     /// kms test aid without CAP_SYS_ADMIN: real vblank/flip pacing of the plane, content
     /// from VAAPI test surfaces through the same DMA-BUF path
     #[arg(long, hide = true)]
@@ -231,11 +235,11 @@ pub struct Args {
     pub open_web: bool,
     /// command-line mode: no web UI, stream with only the given options, save nothing, exit
     /// when the stream ends. Implied by --list, --no-connect, --dump, --frames, --duration,
-    /// --preview and --print-pose (unless --web)
+    /// --preview and --print-pose
     #[arg(long)]
     #[serde(skip)]
     pub no_web: bool,
-    /// (the default; kept for scripts) keep the web UI even with the options that imply --no-web
+    /// (the default; kept for scripts)
     #[arg(long, hide = true, conflicts_with = "no_web")]
     #[serde(skip)]
     pub web: bool,
@@ -246,8 +250,8 @@ pub struct Args {
     pub tray: bool,
 }
 
-/// Options that only make sense for one run (benchmarks, diagnostics). Given without `--web`
-/// they select the command-line mode, so they never end up in the web UI's saved settings.
+/// Options that only make sense for one run (benchmarks, diagnostics): they select the
+/// command-line mode, so they never end up in the web UI's saved settings.
 const ONE_RUN_OPTIONS: &[&str] = &["list", "no_connect", "dump", "frames", "duration", "preview", "print_pose"];
 
 /// Options about the frontend itself, never saved as settings.
@@ -263,7 +267,7 @@ enum Mode {
 /// `desktop`: started without a terminal (a double-click on Windows).
 fn mode(a: &Args, overrides: &std::collections::HashSet<String>, desktop: bool) -> Mode {
     let one_run = ONE_RUN_OPTIONS.iter().any(|name| overrides.contains(*name));
-    if a.no_web || (one_run && !a.web) {
+    if a.no_web || one_run {
         return Mode::CommandLine;
     }
     Mode::Web(crate::rpc::WebOptions {
@@ -467,7 +471,7 @@ pub(crate) fn build_source(a: &Args) -> Result<SourceKind, String> {
         #[cfg(windows)]
         "dxgi" => {
             let (adapter, output) = parse_dxgi(&a.dxgi)?;
-            SourceKind::Dxgi { adapter, output }
+            SourceKind::Dxgi { adapter, output, cursor: a.dxgi_cursor.parse()? }
         }
         #[cfg(target_os = "macos")]
         "screencapturekit" | "sck" => SourceKind::ScreenCaptureKit { display_id: a.display_id, cursor: a.cursor },
@@ -499,7 +503,7 @@ pub fn main() {
             Ok(()) => return,
             // a development build without `pnpm build`: stream without the web UI (but never
             // from a double-click, where nobody would see it)
-            Err(crate::rpc::WebError::NotBuilt(e)) if !desktop && !a.web && !a.open_web && !a.tray => {
+            Err(crate::rpc::WebError::NotBuilt(e)) if !desktop && !a.open_web && !a.tray => {
                 eprintln!("[eyepiece-pc] {e}; running without the web UI (--no-web)");
             }
             Err(e) => {
@@ -907,8 +911,7 @@ mod tests {
         for one_run in [&["--list"][..], &["--no-connect"], &["--duration", "10"], &["--frames", "5"], &["--dump", "x.h264"], &["--print-pose"], &["--preview"]] {
             assert_eq!(mode_of(one_run, false), Mode::CommandLine, "{one_run:?}");
         }
-        // --web keeps the old explicit behaviour: the web UI with these options as settings
-        assert!(matches!(mode_of(&["--web", "--no-connect", "--duration", "10"], false), Mode::Web(_)));
+        assert!(matches!(mode_of(&["--web"], false), Mode::Web(_)));
         assert!(Args::try_parse_from(["eyepiece-pc", "--no-web", "--open-web"]).is_err());
         // a double-click: the browser opens, the stream only resumes, the tray icon on Windows
         assert_eq!(

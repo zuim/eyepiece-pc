@@ -309,7 +309,7 @@ fn setting_visible(
         "host" | "reconnect" | "stop_bridge" => !args.no_connect,
         "source" | "fps" | "cursor" | "sync" | "output" | "kms_device" | "kms_plane"
         | "kms_simulate" | "display" | "region" | "input" | "lavfi" | "restore_token"
-        | "display_id" | "dxgi" => {
+        | "display_id" | "dxgi" | "dxgi_cursor" => {
             if !video {
                 return false;
             }
@@ -327,7 +327,7 @@ fn setting_visible(
                 "lavfi" => source == "test",
                 "restore_token" => source == "pipewire",
                 "display_id" => source == "screencapturekit",
-                "dxgi" => source == "dxgi",
+                "dxgi" | "dxgi_cursor" => source == "dxgi",
                 _ => false,
             }
         }

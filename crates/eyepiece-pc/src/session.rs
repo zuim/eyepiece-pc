@@ -34,7 +34,7 @@ pub enum SourceKind {
     #[cfg(all(target_os = "linux", feature = "pipewire"))]
     PipeWire { restore_token_file: Option<PathBuf>, cursor: bool },
     #[cfg(windows)]
-    Dxgi { adapter: u32, output: u32 },
+    Dxgi { adapter: u32, output: u32, cursor: eyepiece_capture::cursor::CursorMode },
     #[cfg(target_os = "macos")]
     ScreenCaptureKit { display_id: Option<u32>, cursor: bool },
     Test { lavfi: Option<String> },
@@ -240,8 +240,8 @@ fn make_source(cfg: &Config, _encoder_family: encoder::Family) -> Result<Box<dyn
             Box::new(eyepiece_av::CaptureSource::new(Box::new(p), &cfg.drm_device))
         }
         #[cfg(windows)]
-        SourceKind::Dxgi { adapter, output } => {
-            let d = eyepiece_capture::dxgi::DxgiCapture::open(*adapter, *output, fps)?;
+        SourceKind::Dxgi { adapter, output, cursor } => {
+            let d = eyepiece_capture::dxgi::DxgiCapture::open(*adapter, *output, fps, *cursor)?;
             Box::new(eyepiece_av::CaptureSource::new(Box::new(d), ""))
         }
         #[cfg(target_os = "macos")]
