@@ -46,11 +46,9 @@ jobs:
           name="eyepiece-pc-$ver-linux-x86_64"
           mkdir -p "dist/$name"
           bin=target/release; feat="x11,kms,pipewire"
-          cp "$bin/eyepiece-pc" "$bin/eyepiece-gui" "dist/$name/"
-          cp packaging/linux/eyepiece-gui.desktop packaging/linux/eyepiece-gui.svg "dist/$name/"
+          cp "$bin/eyepiece-pc" "dist/$name/"
           echo "eyepiece-pc $ver, features: $feat, built on debian:testing ($(dpkg-query -W -f='${Version}' libavcodec-dev))" > "dist/$name/BUILD-INFO.txt"
           cp README.md LICENSE "dist/$name/"
-          cp -r legacy "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
       - uses: actions/upload-artifact@v4
         with:
@@ -134,10 +132,9 @@ jobs:
           $name = "eyepiece-pc-$ver-windows-x86_64"
           $d = "dist\$name"
           New-Item -ItemType Directory -Force $d | Out-Null
-          Copy-Item target\release\eyepiece-pc.exe, target\release\eyepiece-gui.exe, README.md, LICENSE $d
+          Copy-Item target\release\eyepiece-pc.exe, README.md, LICENSE $d
           Copy-Item "$env:FFMPEG_DIR\bin\*.dll" $d
           Copy-Item "$env:FFMPEG_DIR\LICENSE.txt" "$d\FFMPEG-LICENSE.txt" -ErrorAction SilentlyContinue
-          Copy-Item -Recurse legacy $d
           Compress-Archive -Path $d -DestinationPath "dist\$name.zip"
       - uses: actions/upload-artifact@v4
         with:

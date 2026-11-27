@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
-    <key>CFBundleExecutable</key><string>eyepiece-gui</string>
+    <key>CFBundleExecutable</key><string>eyepiece-pc</string>
     <key>CFBundleIdentifier</key><string>org.zuim.eyepiece-pc</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Eyepiece</string>

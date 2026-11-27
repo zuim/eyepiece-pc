@@ -45,8 +45,6 @@
             nativeBuildInputs = with pkgs; [
               pkg-config
               rustPlatform.bindgenHook
-            ] ++ lib.optionals stdenv.hostPlatform.isLinux [
-              makeWrapper
             ] ++ lib.optionals stdenv.hostPlatform.isDarwin [
               swift
               swiftpm
@@ -58,11 +56,6 @@
             FFMPEG_LIB_DIR = "${pkgs.ffmpeg.lib}/lib";
 
             preBuild = lib.optionalString stdenv.hostPlatform.isDarwin (swiftLinkerFlags pkgs);
-
-            postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
-              wrapProgram "$out/bin/eyepiece-gui" \
-                --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath linuxLibraries}"
-            '';
 
             meta = {
               description = "Stream PC screen and head tracking to DJI Goggles";

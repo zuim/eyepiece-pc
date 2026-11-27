@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Eyepiece
-Comment=Stream the PC screen to DJI Goggles 3 over USB, head tracking back
-Exec=eyepiece-gui
-Icon=eyepiece-gui
-Categories=AudioVideo;Video;Utility;
-Terminal=false
-StartupWMClass=eyepiece-gui

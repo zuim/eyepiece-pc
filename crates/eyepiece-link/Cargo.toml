@@ -9,3 +9,8 @@ repository.workspace = true
 [dependencies]
 libc = "0.2"
 nusb = "0.2.9"
+prost = "0.13"
+
+[build-dependencies]
+prost-build = "0.13"
+protoc-bin-vendored = "3"

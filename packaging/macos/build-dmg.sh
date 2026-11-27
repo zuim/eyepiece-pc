@@ -18,7 +18,7 @@ if [[ -e "$staging" || -e "$dmg" ]]; then
 fi
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks" "$app/Contents/Resources"
 cp packaging/macos/Info.plist "$app/Contents/Info.plist"
-cp "$binary_dir/eyepiece-gui" "$binary_dir/eyepiece-pc" "$app/Contents/MacOS/"
+cp "$binary_dir/eyepiece-pc" "$app/Contents/MacOS/"
 cp README.md LICENSE "$app/Contents/Resources/"
 if [[ ${INCLUDE_HOMEBREW_METADATA:-0} == 1 ]]; then
     dependencies=$(brew deps --installed ffmpeg)
@@ -42,7 +42,6 @@ codesign --force --sign - "$app"
 codesign --verify --deep --strict "$app"
 
 "$app/Contents/MacOS/eyepiece-pc" --version
-"$app/Contents/MacOS/eyepiece-gui" --version
 "$app/Contents/MacOS/eyepiece-pc" --source test --no-connect --encoder x264 --codec h264 --fps 30 --duration 1
 ln -s /Applications "$staging/Applications"
 hdiutil create -quiet -volname Eyepiece -srcfolder "$staging" -format UDZO "$dmg"

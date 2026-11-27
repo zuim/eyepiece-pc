@@ -5,7 +5,7 @@ require 'open3'
 
 app = ARGV.fetch(0)
 frameworks = File.join(app, 'Contents', 'Frameworks')
-executables = %w[eyepiece-gui eyepiece-pc].map { |name| File.join(app, 'Contents', 'MacOS', name) }
+executables = %w[eyepiece-pc].map { |name| File.join(app, 'Contents', 'MacOS', name) }
 libraries = {}
 queue = []
 

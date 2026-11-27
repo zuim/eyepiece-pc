@@ -10,6 +10,6 @@ pub mod hw;
 pub mod simkms;
 pub mod source;
 
-pub use convert::{ConvertConfig, Converter, Target};
+pub use convert::{ConvertConfig, Converter, PackedAlpha, Target};
 pub use encoder::{Codec, Encoder, EncoderConfig, Packet};
 pub use source::{CaptureSource, FileSource, Source, SourceFrame, TestSource};

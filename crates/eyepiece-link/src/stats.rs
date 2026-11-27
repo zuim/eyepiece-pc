@@ -38,6 +38,25 @@ impl Interval {
         self.dropped = dropped;
         out
     }
+
+    pub fn extend(&mut self, other: &Interval) {
+        self.sent += other.sent;
+        self.bytes += other.bytes;
+        self.captured += other.captured;
+        self.skipped += other.skipped;
+        self.idr += other.idr;
+        self.shown += other.shown;
+        self.lat.extend_from_slice(&other.lat);
+        self.recv.extend_from_slice(&other.recv);
+        self.dec.extend_from_slice(&other.dec);
+        self.cvt.extend_from_slice(&other.cvt);
+        self.q_max = self.q_max.max(other.q_max);
+        self.dropped = other.dropped;
+        self.poses += other.poses;
+        self.cap_send.extend_from_slice(&other.cap_send);
+        self.cap_enc.extend_from_slice(&other.cap_enc);
+        self.enc.extend_from_slice(&other.enc);
+    }
 }
 
 pub fn pct_ms<T: Copy + Into<f64>>(v: &[T], q: f64) -> f64 {
@@ -58,6 +77,7 @@ fn pct_i64(v: &[i64], q: f64) -> f64 {
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     pub interval_s: f64,
+    pub report_interval_s: f64,
     pub sent_fps: f64,
     pub mbps: f64,
     pub shown_fps: f64,
@@ -90,6 +110,7 @@ impl Snapshot {
     pub fn from_interval(s: &Interval, interval_s: f64, rtt_us: Option<u64>, pose: Option<(f32, f32)>) -> Snapshot {
         Snapshot {
             interval_s,
+            report_interval_s: interval_s,
             sent_fps: s.sent as f64 / interval_s,
             mbps: s.bytes as f64 * 8.0 / interval_s / 1e6,
             shown_fps: s.shown as f64 / interval_s,
