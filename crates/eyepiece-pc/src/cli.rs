@@ -50,7 +50,7 @@ pub struct Args {
     /// extra bridge args (e.g. --bridge-args=-M)
     #[arg(long, default_value = "", allow_hyphen_values = true)]
     pub bridge_args: String,
-    /// ask the bridge to exit when we quit
+    /// ask the bridge to exit when we quit (always done for a bridge this session launched)
     #[arg(long)]
     pub stop_bridge: bool,
     /// keep running when the bridge disconnects and reconnect (IDR on every connect)
@@ -634,7 +634,10 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
         video: !a.no_video,
         link,
         reconnect: a.reconnect,
-        stop_bridge: a.stop_bridge || (a.reconnect && !a.no_launch && !a.no_connect),
+        // a bridge this session launched (-1) exits with it anyway; Quit makes that immediate (over USB a
+        // session's end is otherwise only seen at the bridge's read timeout, seconds of a frozen picture).
+        // A bridge started from the goggles' menu (--no-launch) stays for the next client.
+        stop_bridge: a.stop_bridge || (!a.no_launch && !a.no_connect),
         dump: a.dump.clone(),
         preview,
         stats_interval: a.stats_interval,
