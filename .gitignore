@@ -3,3 +3,8 @@ __pycache__/
 *.h264
 *.token
 packaging/linux/eyepiece_bridge
+**/node_modules/
+**/.svelte-kit/
+web/build/
+web/test-results/
+web/playwright-report/

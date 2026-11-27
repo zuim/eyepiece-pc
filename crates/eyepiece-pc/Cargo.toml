@@ -10,13 +10,21 @@ repository.workspace = true
 default = ["x11", "pipewire"]
 x11 = ["eyepiece-capture/x11"]
 pipewire = ["eyepiece-capture/pipewire"]
-# serde derives on cli::Args (settings files of frontends such as eyepiece-gui)
-serde = ["dep:serde"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
-serde = { version = "1", features = ["derive"], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+prost = "0.13"
+directories = "6"
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "signal", "time"] }
+tower-http = { version = "0.6", features = ["fs"] }
+futures-util = "0.3"
+getrandom = "0.3"
+subtle = "2"
+shlex = "1"
 eyepiece-av = { path = "../eyepiece-av" }
 eyepiece-capture = { path = "../eyepiece-capture", default-features = false }
 eyepiece-link = { path = "../eyepiece-link" }

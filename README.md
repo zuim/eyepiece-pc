@@ -1,500 +1,65 @@
 # eyepiece-pc
 
-PC side of **Eyepiece**: use the DJI Goggles 3 as a USB display for your PC, with head
-tracking back. `eyepiece-pc` captures the PC screen, encodes it with low latency (NVENC,
-VAAPI, AMF, QSV, macOS VideoToolbox or x264 through the FFmpeg libraries) and sends it over USB (`adb forward`)
-to `eyepiece_bridge` on the goggles. The goggles' head attitude comes back at 100 Hz and is
-forwarded to [opentrack](https://github.com/opentrack/opentrack), so games with head-tracking
-support can use it. `eyepiece-gui` is a desktop UI for the same engine (see [GUI](#gui)).
-
-The goggles side lives in [natartos](https://github.com/zuim/natartos) (branch `eyepiece`,
-mod `mods/eyepiece`; a fork of grom-labs' natartos): it adds an "Eyepiece" entry to the goggles' menu that starts
-`eyepiece_bridge`, and its overlay mod puts the stream on the display. The wire protocol is
-defined in natartos `mods/eyepiece/bridge/proto.h`.
+PC side of **Eyepiece**: use the DJI Goggles 3 as a USB display for your PC, with head tracking back.
+`eyepiece-pc` captures the PC screen, encodes it with low latency (NVENC, VAAPI, AMF, QSV, macOS
+VideoToolbox or x264 through the FFmpeg libraries) and sends it over USB to `eyepiece_bridge` on the
+goggles. The goggles' head attitude comes back at 100 Hz and is forwarded to
+[opentrack](https://github.com/opentrack/opentrack), so games with head-tracking support can use it.
 
 ```
- KMS plane / PipeWire / X11 / DXGI ──► convert (GPU: scale, letterbox, NV12) ──► encode (NVENC/VAAPI/…)
-        stamped at PC vblank               stage A thread                          stage B thread
-                                                                                       │ Annex-B AU, pts = capture time
- opentrack UDP ◄── pose ◄──────── Eyepiece protocol (adb forward tcp:42420) ◄──────────┘──► eyepiece_bridge
+ screen capture ─► convert (GPU) ─► encode ─► eyepiece-pc ══ USB ══► eyepiece_bridge ─► hardware decode ─► goggles display
+                                                  ▲                          │
+                                       opentrack ◄┴── head pose, frame stats ◄┘
 ```
 
-## Install
+The goggles side lives in [natartos](https://github.com/zuim/natartos) (branch `eyepiece`, mod
+`mods/eyepiece`; a fork of grom-labs' natartos): it adds an **Eyepiece** entry to the goggles' menu and puts
+the stream on the display. The wire format is defined in
+[`contract/eyepiece-rpc.proto`](contract/eyepiece-rpc.proto), shared by the bridge protocol and the
+web UI's RPC.
 
-### Prebuilt releases
+## Features
 
-Download from the GitHub releases page:
+- Low-latency capture from KMS, PipeWire, X11, DXGI (Windows) or ScreenCaptureKit (macOS), paced to the display
+  refresh; about 13–14 ms capture-to-shown with KMS and NVENC.
+- Full-panel video or a movable picture-in-picture pane, with colour-key or source-alpha transparency and live
+  GUI and pane opacity.
+- Head tracking into games through opentrack (Windows, and Linux through Wine/Proton).
+- USB through `adb forward`, or a dedicated USB bulk interface.
+- A browser UI (`eyepiece-pc --web`) with live settings, statistics, head-pose view and stream preview.
+- Many settings change live without restarting the stream, and a stream that was running resumes when the
+  web UI server restarts; `--reconnect` rides out a link drop.
 
-- `eyepiece-pc-<version>-linux-x86_64.tar.gz` (`eyepiece-pc` + `eyepiece-gui`) — built on Debian testing against **FFmpeg 9**
-  (libavcodec 63). It needs the FFmpeg 9 runtime libraries (`libavcodec63`, `libavfilter12`,
-  `libavformat63`, `libavutil61`), libdrm and libpipewire-0.3; on distributions with another
-  FFmpeg major, build from source.
-- `eyepiece-pc-<version>-linux-x86_64.AppImage` — the GUI (and the CLI: start it through a
-  symlink named `eyepiece-pc`) with FFmpeg 9 bundled, for distributions with glibc 2.39 or
-  newer (Ubuntu 24.04, Debian 13, Fedora 40 and later). No KMS screen capture from the
-  AppImage (it cannot hold the capability): use PipeWire/X11 capture or the tar.gz.
-  NVENC needs NVIDIA driver 530 or newer; AMF and QSV are not included.
-- `eyepiece-pc-<version>-windows-x86_64.zip` (`eyepiece-pc.exe` + `eyepiece-gui.exe`) — includes the FFmpeg DLLs (BtbN shared build).
-  **The Windows (DXGI capture) path is untested.**
-- `eyepiece-pc-<version>-macos-arm64.dmg` — Apple Silicon app bundle and CLI,
-  with FFmpeg libraries included; requires macOS 15 or newer. The bundle is
-  ad-hoc signed, **not Developer ID signed or notarized**, so Gatekeeper can
-  block it until the user explicitly approves it in System Settings.
+## Quick start
 
-You also need `adb` (Android platform-tools) and the goggles running natartos with the
-Eyepiece mod. eyepiece-pc starts the bridge installed with the mod by itself; to use a
-different `eyepiece_bridge` (e.g. a newer natartos release), put it next to the `eyepiece-pc`
-executable or in `~/.local/share/eyepiece/` (`$XDG_DATA_HOME/eyepiece/`), or pass `--bridge`.
-On macOS, Finder-launched apps may not inherit Homebrew's PATH: set the full path
-to `adb` in the GUI's Advanced settings (typically `/opt/homebrew/bin/adb`).
-The optional external `--preview` window also requires `ffplay` on PATH.
-
-Recommended on Linux: install to `~/.local/bin` (see [Permissions](#permissions-linux-kms-capture)).
+1. Get a release or [build from source](docs/development/building.md); install `adb`.
+2. Connect the goggles (running natartos with the Eyepiece mod) over USB.
+3. Run it:
 
 ```sh
-tar xf eyepiece-pc-*-linux-x86_64.tar.gz
-install -Dm755 eyepiece-pc-*/eyepiece-pc ~/.local/bin/eyepiece-pc
+eyepiece-pc                       # capture the first screen, best encoder
+eyepiece-pc --head-tracking       # stream and head tracking to opentrack
+eyepiece-pc --web                 # the browser UI at http://127.0.0.1:4174/
 ```
 
-### Build from source
+`eyepiece-pc` starts the bridge on the goggles by itself. Everything is experimental: **never use it while flying.**
 
-With Nix, `nix build` builds the workspace binaries. The package supports Linux
-and Apple Silicon macOS; Intel macOS lacks a Swift 6 package in the pinned
-nixpkgs. `nix develop` provides a development shell.
+## Documentation
 
-Linux (Debian/Ubuntu package names; FFmpeg 9 headers, tested with 9.0.2):
-
-```sh
-sudo apt install build-essential pkg-config libclang-dev \
-    libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev libdrm-dev \
-    libpipewire-0.3-dev libspa-0.2-dev
-cargo build --release                       # → target/release/eyepiece-pc, target/release/eyepiece-gui
-cargo build --release -p eyepiece-pc        # the CLI only
-cargo build --release --no-default-features --features x11   # without PipeWire capture (no libpipewire needed)
-cargo test
-```
-
-The GUI needs no extra `-dev` packages: it loads the windowing and OpenGL libraries
-(`libwayland-client` or `libX11`, `libxkbcommon`, `libEGL`/`libGL`) at run time.
-
-The FFmpeg bindings are generated by bindgen against the installed headers. Without the
-`-dev` packages, set `FFMPEG_INCLUDE_DIR` / `FFMPEG_LIB_DIR` (see [env-local.sh](env-local.sh)
-for headers unpacked from the `.deb`s), and `LIBCLANG_PATH` if libclang is not found.
-
-Windows: install LLVM (for libclang), unpack a BtbN FFmpeg 9 *shared* build
-(`ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip`), then
-
-```pwsh
-$env:FFMPEG_INCLUDE_DIR = "C:\ffmpeg\include"; $env:FFMPEG_LIB_DIR = "C:\ffmpeg\lib"
-$env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
-cargo build --release      # put C:\ffmpeg\bin (the DLLs) on PATH or next to the .exe
-```
-
-### macOS
-
-The CLI now has a [ScreenCaptureKit backend](https://github.com/doom-fish/screencapturekit-rs)
-and FFmpeg VideoToolbox encoding. Requires macOS 13+, Xcode 26 (with the macOS 26
-SDK and Swift compiler, for the Swift bridges), current stable Rust and
-FFmpeg headers. The lockfile includes Edition 2024 dependencies; Cargo 1.83 is too old.
-The CI release is an ad-hoc-signed Apple Silicon app bundle, not a notarized
-menu-bar app or an iOS app. Source builds support macOS 13+; the CI bundle targets
-macOS 15+ because its Homebrew libraries are built on the macOS 15 runner.
-
-The Intel macOS Nix development shell uses Swift 5.10 and the macOS 14 SDK,
-which are too old for the current `apple-metal` dependency.
-
-```sh
-brew install rust ffmpeg pkg-config llvm android-platform-tools
-export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
-export MACOSX_DEPLOYMENT_TARGET=13.0
-cargo build --release
-target/release/eyepiece-pc --list
-target/release/eyepiece-pc --source screencapturekit --encoder videotoolbox --fps 60 --cursor
-target/release/eyepiece-pc --display-id 1 --encoder videotoolbox   # use an actual ID from --list
-```
-
-Grant your terminal (or packaged app) permission in **System Settings > Privacy &
-Security > Screen & System Audio Recording**, then restart it. Capture is never
-started by unit tests. For an app bundle, include `NSScreenCaptureUsageDescription`
-in its Info.plist and sign the bundle; no entitlement bypasses Screen Recording
-consent. Protected content can be blanked by macOS.
-
-CI builds the DMG with `VERSION=<tag-or-commit> bash packaging/macos/build-dmg.sh`.
-It includes both executables and their non-system linked libraries in the app;
-the CLI is `Eyepiece.app/Contents/MacOS/eyepiece-pc`. CI also records Homebrew
-formula metadata for FFmpeg and its installed dependencies inside the bundle.
-Ad-hoc signing is not Apple notarization; Developer ID signing, notarization,
-and a signed release workflow require separate credentials and configuration.
-
-ScreenCaptureKit is the default source on macOS (`sck` is an alias). The first
-available display is selected unless `--display-id` is provided. Capture uses a
-latest-frame slot, stamps frames with the shared monotonic clock at callback
-arrival, and supports forced keyframes on static screens.
-`--fps` is a requested maximum; display refresh and ScreenCaptureKit delivery
-determine the actual cadence. `--sync` does not change ScreenCaptureKit scheduling.
-Forced static-screen replays are paced at the requested frame interval, including
-while waiting for the first encoded keyframe.
-With a VideoToolbox encoder and no `--vf` or `--cpu-scale`, capture now requests
-encoder-sized video-range NV12 (`420v`) surfaces. ScreenCaptureKit performs
-scaling, chroma-aligned letterboxing and Rec.709 conversion. The original
-`CVPixelBuffer` is retained in an `AV_PIX_FMT_VIDEOTOOLBOX` frame, then downloaded
-to CPU NV12 before hardware encoding. This intentionally trades zero-copy handoff
-for lower latency: direct native input buffered roughly four frames on the tested
-M4 Pro, despite FFmpeg's `LOW_DELAY` selecting Apple's real-time encoder.
-Capture-side scaling/letterboxing remains; no CPU swscale pass is needed.
-The converter log explicitly reports `NV12 readback`.
-
-The latest-frame slot can replace an unclaimed frame, and captured surfaces remain
-reference-counted until conversion releases them. There is no direct VideoToolbox dependency; the
-hardware encoder remains FFmpeg's `h264_videotoolbox` / `hevc_videotoolbox`.
-
-Software encoders, custom `--vf` filters, or `--cpu-scale` select the existing
-BGRA capture/copy plus CPU conversion path. Test/file sources also retain the
-existing conversion path. To compare capture-side scaling and BGRA CPU conversion without goggles:
-
-```sh
-target/release/eyepiece-pc --encoder videotoolbox --fps 60 \
-  --no-connect --duration 10 --dump nv12.h264
-target/release/eyepiece-pc --encoder videotoolbox --fps 60 \
-  --cpu-scale --no-connect --duration 10 --dump cpu.h264
-```
-
-On a Mac, verify decoded output dimensions, black bars on a 16:10 or portrait
-display, colors, static-screen forced IDRs (`i`), receiver reconnect, and memory
-usage under encoder load. Linux tests cover layout and converter routing; macOS
-unit tests cover native buffer retention and frame cloning without screen capture.
-Those Apple-only tests and live capture cannot run on Linux.
-
-#### MacBook hardware encoding
-
-Yes: Apple Silicon Macs have H.264/HEVC media engines, exposed through
-`h264_videotoolbox` / `hevc_videotoolbox`. Intel Macs can expose hardware encoders
-through VideoToolbox too, but codec, resolution, low-latency support and availability
-depend on the machine. `--encoder auto` probes **hardware-only VideoToolbox first**
-on macOS, then falls back to x264 (x265 for HEVC). Explicit `--encoder videotoolbox`
-requires hardware by default (`allow_sw=0`), with real-time/speed hints and no
-B-frames. If the device or linked FFmpeg cannot open that encoder, it errors rather
-than silently selecting software. User `--enc-opt` values can override the defaults.
-On macOS `--codec` defaults to HEVC (H.264 elsewhere); VideoToolbox HEVC is limited to
-one reference frame (`max_ref_frames=1`) so the goggles' decoder does not run out of
-frame buffers.
-
-The two primary macOS H.264 pipelines follow the measured live benchmark references:
-VideoToolbox uses capture-side NV12 scaling/letterboxing followed by NV12 readback;
-explicit `--encoder x264` uses BGRA capture/copy and CPU conversion with
-`superfast`/`zerolatency`. Hardware remains the default to preserve CPU headroom;
-x264 is an explicit lower-host-latency option. Both retain the latest-frame mailbox.
-
-Named software encoders are literal: `x264` means `libx264` (H.264 only), and
-`x265` means `libx265` (HEVC only). Incompatible encoder/codec combinations,
-including `--encoder x264 --codec hevc`, report an error instead of silently
-changing encoder. Generic `--encoder software` and `auto` retain codec-appropriate
-software fallback; explicit FFmpeg encoder names are also checked against the codec.
-
-Check the FFmpeg build and run a hardware-only encode without capture or goggles:
-
-```sh
-ffmpeg -hide_banner -encoders | grep videotoolbox
-target/release/eyepiece-pc --source test --encoder videotoolbox --fps 60 \
-  --no-connect --duration 10 --dump mac-hardware.h264 --ffmpeg-log debug
-```
-
-The session log names `h264_videotoolbox` and its `allow_sw=0` option; FFmpeg debug
-logging can also report the selected Apple encoder ID. An encoder appearing in
-`ffmpeg -encoders` alone does not prove the hardware can open it. VideoToolbox uses
-a target bitrate; the existing VBV/slice knobs are driver-managed, not the strict
-CBR/VBV behavior of NVENC. For compatible macOS 13+ hardware, strict CBR can be
-requested with `--enc-opt constant_bit_rate=1`; unsupported encoders reject it.
-
-Capture and hardware encoding have been benchmarked on an M4 Pro; **goggles and
-end-to-end display latency remain untested**. See [encoder benchmarks](docs/encoder-benchmarks.md)
-for results and repeatable commands. The macOS
-CI job builds the Apple-only code and runs non-capture tests; it does not
-validate TCC permissions, live capture, hardware encoding or end-to-end latency.
-
-## Permissions (Linux KMS capture)
-
-KMS capture (the default on Linux) reads the framebuffer the display controller is scanning
-out. The kernel only hands out framebuffer handles (`drmModeGetFB2`) to callers with
-**CAP_SYS_ADMIN**; opening `/dev/dri/card0` needs group `video`. Give the capability to an
-installed copy — a rebuild drops file capabilities, and a capability binary should not live
-in a user-writable build directory:
-
-```sh
-install -Dm755 target/release/eyepiece-pc ~/.local/bin/eyepiece-pc
-sudo setcap cap_sys_admin+ep ~/.local/bin/eyepiece-pc
-getcap ~/.local/bin/eyepiece-pc          # (libcap2-bin) → cap_sys_admin=ep
-```
-
-10-bit framebuffers (`AR30`/`AB30`/`XR30`/`XB30`, the KWin 6 default) are imported
-directly. fp16 (`AB48`, HDR on) is not supported. `eyepiece-pc` drops the capability
-immediately for every non-KMS run and refuses `--vf` while it holds it (filters can load
-plugin code). `--source pipewire` and `--source x11` need no privileges.
-
-## Usage
-
-Start **Eyepiece** from the goggles' menu (natartos), connect USB, then:
-
-```sh
-eyepiece-pc --list                                  # outputs, planes, framebuffer formats
-eyepiece-pc                                         # capture the first screen, best encoder
-eyepiece-pc --output eDP-1 --encoder nvenc --bitrate 30M
-eyepiece-pc --head-tracking                         # stream + head tracking to opentrack
-eyepiece-pc --no-video --print-pose                 # head tracking only
-eyepiece-pc --source pipewire --restore-token ~/.config/eyepiece.token   # Wayland portal, no root
-eyepiece-pc --source test --preview                 # test pattern + local ffplay preview
-eyepiece-pc --source file --input clip.mkv
-eyepiece-pc --bridge-args=-M                        # bridge display-timing metrics in its log
-eyepiece-pc --no-deploy                             # use the bridge started from the goggles' menu
-```
-
-By default eyepiece-pc starts the bridge itself (no need to open Eyepiece in the goggles'
-menu first; a bridge started there is replaced): a local `eyepiece_bridge` / `--bridge` is
-pushed to `/data/local/tmp/eyepiece/`, otherwise the one installed on the goggles is used. It
-runs with `-1 -b` (exits with the PC session); its log is `/data/local/tmp/eyepiece.log` on
-the goggles. `--no-deploy` uses a bridge that is already running.
-
-### Resolution
-
-The stream is always 1920x1080, the goggles' panel size: they have no display scaler, and the
-bridge refuses any other size. Every source is scaled to fit on the PC and letterboxed with
-black bars (`--no-letterbox` stretches instead).
-
-Stdin: `r` recenter, `i` force an IDR, `q` quit (each + Enter). Ctrl-C quits cleanly
-(twice: hard). `--dump out.h264` also writes the exact Annex-B stream; `--no-connect
---duration 10` encodes without a bridge (benchmarks). See `eyepiece-pc --help` for all
-options (`--fps` default 100 = goggles panel, `--bitrate` default 20M, `--sync
-vblank|poll|timer`, `--reconnect`, `--host` for RNDIS/Wi-Fi, …).
-
-Stats every 3 s:
-```
-sent 100.3 fps 30.1 Mbit/s | shown 100.3 fps | capture→shown p50 7.5 ms p95 8.1 ms (capture→send 7.5) |
-decode … convert … | queue≤0 dropped 0 | pose … Hz | rtt 0.1 ms | pc: cap 99.9 fps, conv 3.6 enc 3.8 ms, cap→send p95 8.1, skip 0 idr 0
-```
-`capture` is the PC display's vblank at which the frame was on screen (KMS), buffer arrival
-(PipeWire), DXGI present time, or generation time (test/file). `conv` = capture → encoder
-input, `enc` = encoder in → AU out, `skip` = frames dropped because the encoder was still
-busy, `idr` = forced IDRs.
-
-Environment: `EYEPIECE_FILTER_DOWNLOAD=1` forces the libavfilter `hwdownload` path in the
-converter (debugging).
-
-### USB bulk transfers
-
-`--transport usb-bulk` selects the dedicated `Eyepiece bulk` interface without TCP
-fallback. `auto` attempts bulk before the existing RNDIS/ADB selection, and reconnects
-retain the initially selected transport. `--serial` selects the USB device.
-
-The host uses the pure-Rust `nusb` library. Linux needs device-scoped USB permissions;
-macOS needs the vendor interface free of other drivers; Windows needs WinUSB bound
-only to the Eyepiece interface, never the ADB or RNDIS interfaces.
-
-### USB network (lower latency than adb)
-
-A current `eyepiece_bridge` switches the goggles' USB once per boot to a USB network
-(RNDIS) next to adb and hands out an address by DHCP (goggles `192.168.60.2`, PC
-`192.168.60.1`; no default route, no DNS). `--transport auto` (default) streams over it
-when the PC side is connected, otherwise over `adb forward` and says so:
-
-- Linux: set up the new wired network once as a **saved connection with "connect
-  automatically"** (IPv4 automatic/DHCP, no special options). The goggles' MAC is fixed,
-  so it is always the same interface (`enx026579650001`) and the saved connection keeps
-  working. The goggles re-enumerate on the first start after every boot, so a one-off
-  connect (e.g. `nmcli device connect`, which saves no profile) is not brought back up;
-  with NetworkManager:
-  `nmcli connection add type ethernet ifname enx026579650001 con-name eyepiece ipv4.method auto ipv6.method ignore connection.autoconnect yes`.
-- Measured: capture→shown p50 about 11 ms instead of 13–15 ms with adb, link round
-  trip 0.2 ms instead of 2–5 ms, steadier head-pose delivery.
-- `--transport adb` (GUI: *USB network* off) forces the old path and does not switch the
-  goggles' USB at all. A reboot of the goggles returns to the stock USB setup.
-- The switch is requested on every OS. Linux finds the goggles' interface itself (and
-  tells you when it is there but not connected); on other systems the PC checks for a few
-  seconds whether the goggles answer at `192.168.60.2` and otherwise falls back to adb
-  with a notice.
-- **Windows: untested.** Windows' built-in RNDIS driver has to bind to the goggles'
-  network interface (a goggles-side update adds the USB descriptors Windows looks for);
-  then the network gets its address by DHCP like on Linux.
-- **macOS: untested, expected to fall back to adb**: macOS has no built-in RNDIS driver.
-  Turn *USB network* off there to skip the few seconds of checking.
-
-### Stereo 3D (experimental)
-
-`--stereo` treats the source as both eyes side by side (left | right) and sends it as
-2560x720; the goggles switch to their 3D display mode for the session (1280x720 per eye,
-~60 Hz — the panel's only 3D mode, as used by the goggles' own 3D video player) and back to
-2D when it ends. `eyepiece-pc --stereo --source test` shows a stereo test pattern (right eye
-mirrored). Needs natartos v0.1.0-eyepiece.5 or newer (or `--bridge` with a current build).
-Feeding it from VR apps (a VR runtime's compositor window as the source, head pose from
-`--head-tracking`) is work in progress.
-
-## GUI
-
-`eyepiece-gui` runs the same session code as the CLI (same options, same code path), with
-the streaming threads independent of the window:
-
-```sh
-eyepiece-gui                                        # settings from the last run
-eyepiece-gui --start -- --source test --encoder x264    # eyepiece-pc options after `--`
-eyepiece-gui --config my.toml                       # another settings file
-```
-
-<p>
-  <img src="docs/screenshots/gui-simple.png" width="300" alt="eyepiece-gui simple view: Start/Stop, status, Show, Quality, head tracking with a small 3D pose, USB network, preview">
-  <img src="docs/screenshots/gui-full.png" width="520" alt="eyepiece-gui full view: left panel with source, bridge, data link, encoder; Overview tab with preview, 3D head pose and latency per stage">
-</p>
-
-*Simple view and full view, streaming the test pattern to a simulated bridge on the PC
-(the latency numbers are illustrative, not a measurement).*
-
-It opens in a **simple view**: a big Start/Stop button, a status line (connected, data link
-USB network or adb, fps, capture→shown latency), notices (e.g. "connect the USB network"),
-and only the main choices:
-
-- **Show**: a screen (KMS output, greyed out without the capture permission), a screen or
-  window picked through the PipeWire portal, the X11 screen, or a test pattern (Windows:
-  the main screen).
-- **Quality**: *Low latency* (H.264, 20 Mbit/s, the default; on macOS *Balanced*, H.265,
-  20 Mbit/s), *High quality* (H.265,
-  30 Mbit/s: sharper, about 1 ms more encode time), *Low bandwidth* (H.265, 8 Mbit/s). They
-  set codec and bitrate only; anything else shows as *Custom*.
-- **Head tracking** on/off (to opentrack, off by default) and Recenter; while it is on, a
-  small 3D view of the head pose.
-- **Connection**: *USB network (faster)*, on by default (see [USB network](#usb-network-lower-latency-than-adb));
-  off = adb only.
-- **Preview** on/off.
-
-*Full view* switches to everything below (and *Simple view* back); both edit the same
-settings.
-
-- **Left panel**: source and output, bridge (start / use running), data link (USB network
-  / adb, the same setting as *Connection* in the simple view), encoder, bitrate,
-  fps, Start/Stop, head tracking on/off, Recenter, Force IDR, preview on/off.
-- **Overview**: the preview (the encoded stream decoded in-process: what the goggles get,
-  artifacts included), the head pose as a small 3D view with yaw/pitch/roll, and the
-  latency of each stage (p50/p95 per stats interval, from capture to shown on the goggles)
-  with a rolling plot.
-- **Compare**: *Pin* stores the current settings with the mean of the last N seconds of
-  stats; pins are shown side by side (best value per row highlighted) and can be copied as
-  a Markdown table.
-- **Advanced**: every `eyepiece-pc` option, plus the equivalent command line (copy it, or
-  paste one and Apply).
-- **Log**: the session log.
-
-Settings and pins are saved automatically (one second after a change, on Start and on
-exit) in `~/.config/eyepiece/eyepiece-gui.toml` (Windows:
-`%APPDATA%\eyepiece\config\eyepiece-gui.toml`). *Reset to defaults* (simple view, or
-Advanced) resets all options and preview settings but keeps the pins and the view; it can
-be undone for 20 s. Options apply on the next Start; head tracking, preview, Recenter and
-Force IDR apply while streaming.
-
-The preview never slows the stream: the encode thread only copies each access unit into a
-small bounded queue (dropped when full, the preview then waits for the next keyframe), and a
-low-priority thread decodes it (2 threads, loop filter off) and converts every n-th frame
-(about *Max fps*, default 50, evenly spaced) at the chosen width. It is for checking the
-picture, not for judging smoothness or latency. *Keyframes only* is the lightest mode. Measured against the
-protocol test bridge (`eyepiece_bridge_host -N`, test source, 100 fps), capture→send p50 of
-the GUI without preview, and with a 640-wide 30 fps preview, stayed within run-to-run noise
-of the CLI (±0.3 ms); a full-size 100 fps preview with x264 on the same CPU added about
-1.5 ms.
-
-For KMS capture the GUI needs CAP_SYS_ADMIN like the CLI (`setcap` on an installed copy, see
-[Permissions](#permissions-linux-kms-capture)). The window, OpenGL and preview threads run
-without it in effect; only the session thread of a KMS session raises it (capabilities are
-per thread on Linux), and other sessions drop it as the CLI does. PipeWire and X11 capture
-need no privileges.
-
-## Head tracking into games
-
-Head tracking is **off by default**: the goggles' IMU stream only runs while a PC asks for it.
-`--head-tracking` turns it on (`--no-video` and `--print-pose` imply it); the bridge stops it
-again when the PC disconnects. `eyepiece-pc` then sends the goggles' yaw/pitch/roll (degrees;
-+yaw right, +pitch up, +roll right ear down) to opentrack's **"UDP over network"** input on
-`127.0.0.1:4242` (`--opentrack HOST:PORT`, `--opentrack ''` = off). Needs a bridge from
-natartos `v0.1.0-eyepiece.4` or later (older bridges stream head tracking always).
-
-In opentrack: *Input* = "UDP over network", port 4242. Set a centre key in opentrack, and use
-`r` in eyepiece-pc to recenter the goggles' yaw. Then pick the output for your game:
-
-- **Windows**: *Output* = **"freetrack 2.0 enhanced"**. It serves both the FreeTrack and the
-  TrackIR (NPClient) interface, which covers most games with head tracking, e.g. DCS World,
-  Microsoft Flight Simulator, X-Plane, Elite Dangerous, Euro Truck Simulator 2 / American
-  Truck Simulator, iRacing, Star Citizen, Arma 3, IL-2 Sturmovik, Assetto Corsa.
-- **Linux, games under Wine/Proton**: *Output* = **"Wine -- Windows layer for Unix"**, pointed
-  at the game's prefix (Steam/Proton: choose the Proton version and the game's AppID, i.e.
-  `steamapps/compatdata/<appid>/pfx`). opentrack then provides the FreeTrack/TrackIR
-  interface inside that prefix. Start opentrack before the game.
-- Native Linux games with opentrack/UDP support can read the UDP stream directly.
-
-Possible future built-ins (not implemented): a uinput virtual joystick output and a
-FreeTrack shared-memory writer, so simple setups work without opentrack. Stereo/VR runtime
-integration (OpenVR, Monado) is possible future work only.
-
-## Design
-
-Crates (`crates/`), so a UI can be put on top of the library:
-
-| crate | contents |
-|---|---|
-| `eyepiece-link` | protocol, TCP link (writev, no AU copy), receive thread, windowed min-RTT clock sync, IDR requests, opentrack, stats, adb deploy/forward. No FFmpeg. |
-| `eyepiece-capture` | `Capture` trait + backends: `kms` (libdrm, vblank pacing), `x11` (XShm), `portal` (PipeWire, default feature `pipewire`), `dxgi` (Windows), `screencapturekit` (macOS), `pacer` (refresh decimation). No FFmpeg. |
-| `eyepiece-av` | bindgen FFmpeg bindings, DMA-BUF/CPU → AVFrame wrapping (no copy), GPU converter (libavfilter), encoder presets, Annex-B, test/file sources |
-| `eyepiece-pc` | `session::run(Config, Control, Events)` (library API), `cli` (options → `Config`, adb; shared by both frontends) + the CLI |
-| `eyepiece-gui` | egui/eframe (OpenGL) desktop UI on the `eyepiece-pc` library; in-process preview decoder |
-
-Latency measures:
-- **Refresh-synchronised capture.** KMS: `drmWaitVBlank` on the plane's CRTC, then the
-  plane's current framebuffer is exported; a frame is only taken when the framebuffer changed
-  (page flip) — or when an IDR is needed — and decimated evenly to `--fps` (120 Hz panel →
-  100 fps takes 5 of 6 vblanks). `--sync poll` checks the plane every 1 ms; `--sync timer`
-  free-runs. PipeWire: buffer arrival. DXGI: AcquireNextFrame (DWM present).
-- **Zero-copy GPU path.** DMA-BUF → `hwmap` into VAAPI → `scale_vaapi` (aspect kept) → NV12
-  BT.709 limited → `h264_vaapi` directly. For NVENC/x264/AMF/QSV the scaled NV12 picture is
-  copied with streaming loads into pooled buffers whose black bars were filled once.
-- **Correct frame rate to rate control**: time_base 1/fps, pts from capture time, CBR with
-  VBV = `--vbv-frames` frames.
-- **No queues.** Capture + convert hands frames to encode + send through a one-frame slot; a
-  newer frame replaces an unclaimed one (`skip`). The AU is written to the socket as soon as
-  the encoder returns it.
-- **Immediate IDR** on (re)connect, when the bridge reports a queue overflow or needs a
-  keyframe, when frames are sent but none is shown for 200 ms, and on `i`.
-
-Defaults: H.264 High + CABAC (macOS: HEVC Main), GOP 2 s, CBR, VBV 4 frames, 4 slices, no B-frames; NVENC
-`p1`/`ull`/zerolatency, VAAPI `async_depth=1`, x264 `superfast`/`zerolatency`, letterboxed
-1920x1080. PC side, 100 fps at 30 Mbit/s: capture→send about 7.5 ms p50 / 8 ms p95 (NVENC).
-End to end with KMS capture, capture→shown on the goggles is about 13–14 ms p50.
-
-## Status
+See the [documentation index](docs/README.md). Main entry points:
 
 | | |
 |---|---|
-| KMS capture (setcap), vblank pacing, 10-bit, VAAPI→NVENC | tested with the goggles |
-| NVENC / VAAPI / x264 | tested |
-| AMF / QSV / HEVC | wired up, untested (HEVC is not decoded by the bridge's tested path) |
-| X11 (XShm) | tested; slow for very large roots (use `--region`) |
-| PipeWire portal (default feature `pipewire`, Linux) | builds, not yet run against the goggles |
-| Windows DXGI | builds in CI, **never run**; CPU copy via staging texture |
-| macOS ScreenCaptureKit / VideoToolbox | M4 Pro capture/encoding benchmarked; capture-side NV12 scaling plus low-latency readback; goggles untested |
-| GUI (`eyepiece-gui`) | new; run against the protocol test bridge on Linux, not yet with the goggles; Windows untested |
+| [Installation](docs/install.md) | [Command-line usage](docs/usage.md) |
+| [Picture in picture and transparency](docs/pip-and-transparency.md) | [Head tracking into games](docs/head-tracking.md) |
+| [Web UI](docs/web-ui.md) | [Architecture](docs/architecture.md) |
+| [Bridge protocol](docs/protocol/bridge.md) | [Goggles mod and bridge](docs/goggles/bridge.md) |
 
-## Packaging
+## Status
 
-`packaging/linux/build-appimage.sh` builds an AppImage with both programs (a symlink named
-`eyepiece-pc` to the AppImage starts the CLI). It needs
-[linuxdeploy](https://github.com/linuxdeploy/linuxdeploy); without it the script stops after
-assembling the AppDir. For a portable AppImage, build FFmpeg on an old base first with
-`packaging/linux/build-ffmpeg.sh PREFIX` and point `FFMPEG_INCLUDE_DIR`, `FFMPEG_LIB_DIR` and
-`LD_LIBRARY_PATH` at it (this is what CI does on Ubuntu 24.04). `packaging/linux/build-appimage-docker.sh` runs
-exactly that in an `ubuntu:24.04` container (needs only docker or podman). It bundles the FFmpeg libraries but takes glibc, the GPU driver
-stack (libva, libvdpau, NVIDIA/CUDA, OpenCL, Vulkan, GL), libdrm, PipeWire and the windowing
-libraries from the host. An AppImage cannot carry file capabilities, so KMS capture does not
-work from it (use PipeWire or X11 capture, or a native install with `setcap`).
-
-## Legacy
-
-[`legacy/eyepiece_stream.py`](legacy/eyepiece_stream.py) is the earlier Python
-implementation (ffmpeg subprocess + FLV pipe, standard library only), kept as a fallback;
-`legacy/bench.py` measures its PC half, `legacy/kmsfix.c` is a shim that let ffmpeg's
-kmsgrab capture KWin's 10-bit framebuffers.
+KMS capture with NVENC, VAAPI and x264 is tested with the goggles. Other capture sources and encoders are
+less tested; the Windows path has never been run. See [architecture](docs/architecture.md#status) for the
+full table.
 
 ## License
 

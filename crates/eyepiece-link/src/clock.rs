@@ -1,4 +1,4 @@
-//! The PC clock used for every timestamp on the wire (`ep_video_t.pts_us`, `EP_PING`).
+//! The PC clock used for timestamps in bridge video and ping messages.
 //!
 //! Linux: CLOCK_MONOTONIC in µs — the same clock DRM vblank timestamps and PipeWire use,
 //! so capture timestamps from those sources can be used directly.

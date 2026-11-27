@@ -1,0 +1,388 @@
+syntax = "proto3";
+
+package eyepiece.rpc.v1;
+
+// Named values for bridge uint32 fields. Fields remain uint32 to preserve
+// unknown values and existing wire compatibility.
+enum Codec {
+  CODEC_H264 = 0;
+  CODEC_HEVC = 1;
+}
+
+enum ControlOperation {
+  CONTROL_UNSPECIFIED = 0;
+  CONTROL_RECENTER = 1;
+  CONTROL_QUIT = 2;
+  CONTROL_HEADTRACK = 3;
+}
+
+enum StreamLayout {
+  LAYOUT_MONO = 0;
+  LAYOUT_SBS = 1;
+}
+
+enum PaneFormat {
+  PANE_NV12 = 0;
+  PANE_BGRA = 1;
+  PANE_OPAQUE_BGRA = 2;
+}
+
+enum PoseSource {
+  POSE_SOURCE_UNSPECIFIED = 0;
+  POSE_SOURCE_MCU = 3;
+}
+
+enum BridgeCapability {
+  CAPABILITY_NONE = 0;
+  CAPABILITY_STEREO = 1;
+  CAPABILITY_PANE_NV12 = 2;
+  CAPABILITY_PANE_BGRA = 4;
+  CAPABILITY_PANE_OPAQUE_BGRA = 8;
+  CAPABILITY_PANE_RECONNECT = 16;
+  CAPABILITY_RECONFIG = 32;
+  CAPABILITY_GUI_ALPHA = 64;
+  CAPABILITY_GUI_ALPHA_ACTIVE = 128;
+  CAPABILITY_PANE_ALPHA = 256;
+}
+
+// Wire records on TCP, USB, stdio and WebSocket contain a four-byte unsigned
+// big-endian length followed by exactly one serialized Envelope. The length
+// excludes the prefix. A WebSocket binary message contains exactly one record.
+// The bridge limits the encoded envelope to 4 MiB; RPC permits up to 8 MiB.
+// A receiver must reject a zero-length, oversized, truncated or malformed
+// record and an envelope without a recognized message.
+//
+// The optional ID correlates a reply with its request; replies copy the
+// request's ID verbatim. Unsolicited events omit it. WebSocket requests
+// require a nonempty UTF-8 ID of at most 256 bytes. Bridge Configure and
+// both alpha requests require a canonical unsigned 32-bit decimal ID
+// (no leading zeroes except "0"). Sender and
+// recipient are optional endpoint names; they do not authenticate endpoints
+// and current implementations do not route based on them.
+//
+// Bridge protocol version 4 is incompatible with earlier formats; update PC
+// and bridge together. Message field numbers are permanent: never reuse a
+// removed field number. Receivers reject unknown-only envelopes; add new
+// message types only when peers can be upgraded together.
+message Envelope {
+  optional string id = 1;
+  optional string sender = 2;
+  optional string recipient = 3;
+  // Exactly one message is required by the protocol; proto3 itself does not
+  // enforce presence. Unrecognized or missing messages are protocol errors.
+  oneof message {
+    // RPC client -> PC: commands. Successful commands return State unless
+    // they explicitly return another event. Failures return Error with the ID.
+    GetState get_state = 10;
+    SetProperties set_properties = 11;
+    Start start = 12;
+    Stop stop = 13;
+    Restart restart = 14;
+    Recenter recenter = 15;
+    ForceIdr force_idr = 16;
+    SetPreview set_preview = 17;
+    SetCommandLine set_command_line = 18;
+    ListKmsOutputs list_kms_outputs = 19;
+    // PC -> RPC client: replies and unsolicited events.
+    State state = 30;
+    Error error = 31;
+    Log log = 32;
+    Pose pose = 33;
+    Metrics metrics = 34;
+    Preview preview = 35;
+    bool acknowledged = 36;
+    KmsOutputs kms_outputs = 37;
+    // PC -> bridge, followed by bridge -> PC telemetry and acknowledgements.
+    Video video = 50;
+    Ping ping = 51;
+    Control control = 52;
+    GuiAlpha gui_alpha = 56;
+    Pong pong = 57;
+    Frame frame = 58;
+    Info info = 59;
+    KeyRequest key_request = 60;
+    Acknowledgement gui_alpha_ack = 62;
+    PaneAlpha pane_alpha = 63;
+    Acknowledgement pane_alpha_ack = 64;
+    Configure configure = 65;
+    Acknowledgement configure_ack = 66;
+  }
+  // Removed in bridge protocol version 4: stream, pane, reconfigure and
+  // reconfigure_ack are replaced by configure and configure_ack.
+  reserved 53, 54, 55, 61;
+  reserved "stream", "pane", "reconfigure", "reconfigure_ack";
+}
+
+// RPC properties retain their declared type across transport. StringList is
+// wrapped because repeated fields cannot be direct oneof alternatives.
+message StringList {
+  repeated string values = 1;
+}
+
+message Value {
+  // Exactly one kind is expected. unset represents a nullable setting.
+  oneof kind {
+    bool boolean = 1;
+    sint64 integer = 2;
+    double number = 3;
+    string text = 4;
+    StringList strings = 5;
+    bool unset = 6;
+  }
+}
+
+// Named settings use names and types from State.settings_schema_json.
+message Property {
+  string name = 1;
+  Value value = 2;
+}
+
+// RPC commands are sent by the WebUI or a stdio client to eyepiece-pc.
+// GetState requests the current settings, schema, and session state.
+message GetState {}
+
+// Apply all properties atomically; invalid input leaves settings unchanged.
+message SetProperties {
+  repeated Property properties = 1;
+}
+
+// Start, stop, or restart the streaming session.
+message Start {}
+
+message Stop {}
+
+message Restart {}
+
+// Recenter the active head tracker; ForceIdr requests a video keyframe.
+message Recenter {}
+
+message ForceIdr {}
+
+// Subscribe or unsubscribe from encoded video previews.
+message SetPreview {
+  bool enabled = 1;
+  // Supported Annex-B codecs: h264, hevc. Empty preserves the original codec.
+  repeated string supported_codecs = 2;
+  // Request only keyframes. A server may share its encoder among subscribers.
+  bool keyframes_only = 3;
+}
+
+// Replace settings using command-line syntax, validated as a single update.
+message SetCommandLine {
+  string command_line = 1;
+}
+
+// Ask the Linux backend for available KMS output names.
+message ListKmsOutputs {}
+
+// Current desired and running configuration. phase is idle, starting, running
+// or stopping. running_* reflects the active session, which can differ from
+// saved properties until a restart or live update completes.
+message State {
+  string version = 1;
+  string settings_schema_json = 2;
+  repeated Property properties = 3;
+  string phase = 4;
+  bool desired_running = 5;
+  bool connected = 6;
+  string command_line = 7;
+  string running_command_line = 8;
+  repeated Property running_properties = 9;
+}
+
+// Human-readable RPC failure; envelope ID identifies the failed request.
+message Error {
+  string message = 1;
+}
+
+// Human-readable diagnostic emitted by PC or bridge.
+message Log {
+  string line = 1;
+}
+
+// Head orientation in degrees: positive yaw is right, pitch up, roll right ear
+// down. device_us is the goggles' monotonic sample time, not a wall clock.
+// active and source describe the originating tracker (3 = goggles MCU).
+message Pose {
+  float yaw = 1;
+  float pitch = 2;
+  float roll = 3;
+  uint64 device_us = 4;
+  bool active = 5;
+  uint32 source = 6;
+}
+
+// PC -> RPC client statistics. Rate fields use frames/s, poses/s or Mbit/s.
+// *_p50_ms and *_p95_ms are median and 95th-percentile durations in ms:
+// lat capture-to-display; cap_send capture-to-send; cap_enc capture-to-encoder;
+// enc encoder; dec decoder; cvt conversion; recv capture-to-goggles receive.
+// Percentiles and RTT may be NaN when no observations are available.
+message Metrics {
+  // Duration covered by the rolling statistics window.
+  double interval_s = 1;
+  double sent_fps = 2;
+  double mbps = 3;
+  double shown_fps = 4;
+  double lat_p50_ms = 5;
+  double lat_p95_ms = 6;
+  double cap_send_p50_ms = 7;
+  double cap_send_p95_ms = 8;
+  double cap_enc_p50_ms = 9;
+  double cap_enc_p95_ms = 10;
+  double enc_p50_ms = 11;
+  double enc_p95_ms = 12;
+  double dec_p50_ms = 13;
+  double dec_p95_ms = 14;
+  double cvt_p50_ms = 15;
+  double cvt_p95_ms = 16;
+  double recv_p50_ms = 17;
+  double recv_p95_ms = 18;
+  uint32 q_max = 19;    // Maximum bridge decoder queue depth.
+  uint32 dropped = 20;  // Cumulative bridge drops.
+  uint32 skipped = 21;  // PC frames skipped within the interval.
+  uint32 idr = 22;      // Keyframes forced within the interval.
+  double captured_fps = 23;
+  double pose_hz = 24;
+  double rtt_ms = 25;
+  double report_interval_s = 26;  // Reporting interval, seconds.
+  double sampled_at_ms = 27;      // PC wall-clock Unix time, milliseconds.
+}
+
+// PC -> subscribed RPC clients. Each access_unit is a complete Annex-B frame.
+// timestamp_us is microseconds elapsed since the preview source was created;
+// it is not a wall clock or the bridge Video capture timestamp.
+// discontinuity requires decoder reset.
+// A subscriber must wait for a keyframe after a discontinuity or dropped frame.
+message Preview {
+  bytes access_unit = 1;
+  bool key = 2;
+  string codec = 3;
+  uint64 timestamp_us = 4;
+  bool discontinuity = 5;
+  // Color occupies the left half; grayscale alpha occupies the right half.
+  bool packed_alpha = 6;
+}
+
+// Reply to ListKmsOutputs; each item is a backend output identifier.
+message KmsOutputs {
+  repeated string outputs = 1;
+}
+
+// PC -> bridge, after an acknowledged Configure. pts_us is the PC monotonic
+// capture timestamp. codec must match the active Configure: 0 for H.264 and 1
+// for HEVC. access_unit contains one nonempty Annex-B access unit.
+message Video {
+  uint64 pts_us = 1;
+  uint32 codec = 2;
+  bool key = 3;
+  bytes access_unit = 4;
+}
+
+// PC -> bridge; echoed in Pong for clock synchronization.
+message Ping {
+  uint64 pc_us = 1;
+}
+
+// PC -> bridge. operation: 1 recenter, 2 quit, 3 set head tracking enabled.
+message Control {
+  uint32 operation = 1;
+  bool enabled = 2;
+}
+
+// PC -> bridge. Position and size are panel pixels. Format 1 packs color and
+// straight grayscale alpha side by side, and 2 is opaque BGRA; format 0 (NV12)
+// is reserved. For packed alpha, luma 16 is transparent, 235 opaque; color uses
+// limited-range BT.709 and the encoded frame is twice the pane width.
+message Pane {
+  uint32 x = 1;
+  uint32 y = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  uint32 format = 5;
+}
+
+// PC -> bridge. The complete description of the video that follows; it is the
+// only message that defines or changes the stream. Envelope.id is required and
+// echoed in ConfigureAck. A connection starts unconfigured, and Video is a
+// protocol error until a Configure has been acknowledged with status 0.
+//
+// The encoded frame size is derived, never sent: with a pane it is the pane
+// size (twice the width for packed alpha); without a pane it is the panel
+// size for mono layout and 2560x720 for side-by-side stereo. Stereo requires
+// the STEREO capability and cannot be combined with a pane. The pane is
+// optional: absent selects the panel-wide VIDEO0 plane, present selects the
+// GFX1 overlay and requires a PANE_* capability for its format.
+//
+// A later Configure replaces the active one. The sender stops sending old
+// video first and resumes with a keyframe after status 0. Repeating the active
+// configuration is a no-op that only requests a keyframe, which makes it the
+// way to resume a retained session after reconnecting. Pane opacity and GUI
+// opacity are unaffected.
+message Configure {
+  uint32 codec = 1;
+  uint32 layout = 2;
+  optional Pane pane = 3;
+}
+
+// PC -> bridge. alpha is 0..255. Envelope.id is required and echoed in
+// GuiAlphaAck.
+message GuiAlpha {
+  reserved 1;
+  uint32 alpha = 2;
+}
+
+// PC -> bridge, valid while the active Configure has a pane. Multiplies
+// decoded pixel alpha by alpha / 255. Applies to the retained frame and future
+// frames without restarting decode, and is preserved across Configure.
+// Envelope.id is required and echoed in PaneAlphaAck.
+message PaneAlpha {
+  uint32 alpha = 1;
+}
+
+// Bridge -> PC. pc_us echoes Ping; device_us uses the goggles' monotonic clock.
+message Pong {
+  uint64 pc_us = 1;
+  uint64 device_us = 2;
+}
+
+// Bridge -> PC. pts_us echoes Video; received_us and shown_us use the goggles'
+// monotonic clock. Decode and conversion durations are microseconds.
+message Frame {
+  uint64 pts_us = 1;
+  uint64 received_us = 2;
+  uint64 shown_us = 3;
+  uint32 decode_us = 4;
+  uint32 convert_us = 5;
+  uint32 queue_depth = 6;
+  uint32 dropped = 7;
+}
+
+// Bridge -> PC upon connection. framebuffer dimensions are pixels; decoder
+// is 0 none, 1 software, 2 hardware. headtrack bit 0 means MCU pose received.
+// flags: bit 0 stereo, 1 NV12 pane, 2 packed-alpha pane, 3 opaque pane,
+// 4 pane reconnect, 5 live reconfiguration of a GFX1 pane, 6 GUI alpha control,
+// 7 active GUI alpha request, 8 pane alpha. Clients must check capabilities
+// before using these features.
+message Info {
+  uint32 version = 1;
+  uint32 framebuffer_width = 2;
+  uint32 framebuffer_height = 3;
+  uint32 decoder = 4;
+  uint32 headtrack = 5;
+  uint32 flags = 6;
+}
+
+// Bridge -> PC, reserved for explicit keyframe requests.
+message KeyRequest {
+  uint32 reason = 1;
+}
+
+// Bridge -> PC. Envelope.id echoes the corresponding request.
+// Configure status: 0 ready; 1 invalid (nothing changed); 2 failed (the
+// decoder was torn down and the bridge closes the connection); 3 unsupported
+// by this bridge or in this state (nothing changed).
+// GUI alpha and pane alpha status: 0 applied, 1 invalid, 2 unavailable.
+message Acknowledgement {
+  reserved 1;
+  uint32 status = 2;
+}

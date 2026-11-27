@@ -1,14 +1,14 @@
 //! eyepiece-pc command line: the options, and how they become a [`Config`] (adb deploy/forward
 //! included). The `eyepiece-pc` binary is [`main`]; other frontends (the GUI) build an [`Args`]
 //! and use [`prepare`] + [`run_prepared`], so every frontend takes the same code path.
-//! Replaces legacy/eyepiece_stream.py (same protocol, same bridge). See README.md.
 
-use crate::session::{self, Config, Control, Events, SourceKind};
-use clap::Parser;
-use eyepiece_av::{Codec, EncoderConfig};
+use crate::session::{self, Config, Control, Events, PaneConfig, SourceKind};
+use clap::{parser::ValueSource, ArgMatches, CommandFactory, FromArgMatches, Parser};
+use eyepiece_av::{Codec, EncoderConfig, PackedAlpha};
 use eyepiece_capture::SyncMode;
 use eyepiece_link::adb::Adb;
 use eyepiece_link::{LinkOptions, LinkTransport, LogFn};
+use eyepiece_link::proto::{Info, Pane, PaneFormat, EP_INFO_PANE_BGRA};
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -39,11 +39,8 @@ fn find_bridge() -> Option<PathBuf> {
 }
 
 #[derive(Parser, Debug, Clone)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(default)
-)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 #[command(
     name = "eyepiece-pc",
     version,
@@ -66,14 +63,13 @@ pub struct Args {
     /// TCP port (bridge listens on 127.0.0.1:PORT on the goggles)
     #[arg(long, default_value_t = 42420)]
     pub port: u16,
-    /// host to connect to (adb forward ends on 127.0.0.1; RNDIS/Wi-Fi: goggles IP + bridge -A)
+    /// host to connect to (127.0.0.1 via adb forward, or a directly reachable bridge)
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
-    /// data link: auto (USB bulk, then USB network, then adb) | usb-bulk (strict) |
-    /// usb-net (strict RNDIS) | adb (adb forward only)
+    /// data link: auto (USB bulk, then adb) | usb-bulk (strict) | adb (adb forward only)
     #[arg(long, default_value = "auto")]
     pub transport: String,
-    /// don't run `adb forward` (host bridge, RNDIS, forward set up elsewhere)
+    /// don't run `adb forward` (directly reachable bridge or forwarding set up elsewhere)
     #[arg(long)]
     pub no_forward: bool,
     /// don't start a bridge for this session: use the one already running on the goggles
@@ -89,7 +85,7 @@ pub struct Args {
     /// $XDG_DATA_HOME/eyepiece/eyepiece_bridge]
     #[arg(long)]
     pub bridge: Option<PathBuf>,
-    /// extra eyepiece_bridge args for --deploy (e.g. --bridge-args=-M)
+    /// extra eyepiece_bridge args for --deploy (e.g. --bridge-args=-B)
     #[arg(long, default_value = "", allow_hyphen_values = true)]
     pub bridge_args: String,
     /// ask the bridge to exit when we quit
@@ -158,12 +154,31 @@ pub struct Args {
     /// h264 | hevc (default: hevc on macOS, VideoToolbox; else h264)
     #[arg(long, default_value = DEFAULT_CODEC)]
     pub codec: String,
-    /// stereo 3D: the source is both eyes side by side (left | right) and is sent as
-    /// 2560x720 (1280x720 per eye); the goggles switch to their 3D mode (~60 Hz) for the
-    /// session. Use with a side-by-side source (e.g. a VR compositor window); --source test
-    /// shows a stereo test pattern
+    /// stereo 3D side-by-side encoding (GFX1 stereo streaming is not available)
     #[arg(long)]
     pub stereo: bool,
+    /// GFX1 picture-in-picture pane: WIDTHxHEIGHT+X+Y (live changes require a compatible bridge)
+    #[arg(long)]
+    pub pane: Option<String>,
+    /// DJI GUI opacity, 0 to 100 percent
+    #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]
+    pub gui_opacity: u8,
+    /// GFX1 pane opacity, 0 to 100 percent; multiplies source/color-key alpha
+    #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]
+    pub pane_opacity: u8,
+    /// source alpha: opaque | source (works with or without --pane)
+    #[arg(long, visible_alias = "pane-alpha", default_value = "opaque")]
+    #[serde(alias = "pane_alpha")]
+    pub alpha: String,
+    /// optional color key as RRGGBB, e.g. 00ff00
+    #[arg(long)]
+    pub color_key: Option<String>,
+    /// color-key similarity, 0..1 (0 = exact RGB)
+    #[arg(long, default_value_t = 0.0)]
+    pub key_similarity: f32,
+    /// color-key softness within the similarity radius, 0..1
+    #[arg(long, default_value_t = 0.0)]
+    pub key_blend: f32,
     /// auto (VideoToolbox on macOS, else nvenc→vaapi→amf→qsv; then software) | videotoolbox | nvenc | vaapi | amf | qsv | x264 (h264 only) | x265 (hevc only) | FFmpeg name
     #[arg(long, default_value = "auto")]
     pub encoder: String,
@@ -241,6 +256,10 @@ pub struct Args {
     /// FFmpeg log level (quiet, error, warning, info, verbose, debug)
     #[arg(long, default_value = "warning")]
     pub ffmpeg_log: String,
+    /// start the local web interface
+    #[arg(long)]
+    #[serde(skip)]
+    pub web: bool,
 }
 
 fn parse_rate(s: &str) -> Result<u64, String> {
@@ -249,9 +268,45 @@ fn parse_rate(s: &str) -> Result<u64, String> {
         Some('m') => (&s[..s.len() - 1], 1e6),
         _ => (s, 1.0),
     };
-    n.parse::<f64>()
-        .map(|v| (v * mul) as u64)
-        .map_err(|_| format!("bad rate {s}"))
+    let rate = n.parse::<f64>().map_err(|_| format!("bad rate {s}"))? * mul;
+    if !rate.is_finite() || rate <= 0.0 || rate >= i64::MAX as f64 {
+        return Err(format!("bad rate {s}"));
+    }
+    let rate = rate as u64;
+    if rate == 0 {
+        return Err(format!("bad rate {s}"));
+    }
+    Ok(rate)
+}
+
+fn parse_preview_position(s: &str) -> Result<(i32, i32), String> {
+    let (x, y) = match s.split_once(',') {
+        Some((x, y)) if !y.contains(',') => (x, y),
+        Some(_) => return Err("--preview expects X,Y".into()),
+        None => (s, "0"),
+    };
+    Ok((
+        x.parse()
+            .map_err(|_| "--preview has invalid X coordinate")?,
+        y.parse()
+            .map_err(|_| "--preview has invalid Y coordinate")?,
+    ))
+}
+
+#[cfg(any(windows, test))]
+fn parse_dxgi(s: &str) -> Result<(u32, u32), String> {
+    let (adapter, output) = s.split_once(',').ok_or("--dxgi expects ADAPTER,OUTPUT")?;
+    if output.contains(',') {
+        return Err("--dxgi expects ADAPTER,OUTPUT".into());
+    }
+    Ok((
+        adapter
+            .parse()
+            .map_err(|_| "--dxgi has invalid adapter index")?,
+        output
+            .parse()
+            .map_err(|_| "--dxgi has invalid output index")?,
+    ))
 }
 
 fn parse_size(s: &str) -> Result<(u32, u32), String> {
@@ -262,6 +317,65 @@ fn parse_size(s: &str) -> Result<(u32, u32), String> {
         w.parse().map_err(|_| "bad width")?,
         h.parse().map_err(|_| "bad height")?,
     ))
+}
+
+/// Parse pane geometry without validating it against the panel.
+pub fn parse_pane_geometry(spec: &str) -> Result<Pane, String> {
+    let mut parts = spec.split('+');
+    let size = parts.next().unwrap_or_default();
+    let (w, h) = parse_size(size)?;
+    let parse_coord = |s: Option<&str>| -> Result<u16, String> {
+        s.ok_or_else(|| format!("--pane {spec}: expected WIDTHxHEIGHT+X+Y"))?
+            .parse().map_err(|_| format!("--pane {spec}: invalid coordinate"))
+    };
+    let x = parse_coord(parts.next())?;
+    let y = parse_coord(parts.next())?;
+    if parts.next().is_some() || w > u16::MAX as u32 || h > u16::MAX as u32 {
+        return Err(format!("--pane {spec}: expected WIDTHxHEIGHT+X+Y"));
+    }
+    Ok(Pane { x, y, width: w as u16, height: h as u16, format: PaneFormat::Bgra })
+}
+
+/// Validate overlay options without starting a capture or deploying a bridge.
+pub fn pane_config(a: &Args) -> Result<Option<PaneConfig>, String> {
+    if !a.key_similarity.is_finite() || !(0.0..=1.0).contains(&a.key_similarity)
+        || !a.key_blend.is_finite() || !(0.0..=1.0).contains(&a.key_blend)
+    {
+        return Err("--key-similarity and --key-blend must be 0..1".into());
+    }
+    let source_alpha = match a.alpha.as_str() {
+        "opaque" => false,
+        "source" => true,
+        _ => return Err("--alpha must be opaque or source".into()),
+    };
+    let alpha = if let Some(color) = &a.color_key {
+        let hex = color.strip_prefix('#').unwrap_or(color);
+        if hex.len() != 6 || !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
+            return Err("--color-key must be RRGGBB".into());
+        }
+        PackedAlpha::ColorKey {
+            rgb: u32::from_str_radix(hex, 16).map_err(|_| "invalid --color-key")?,
+            similarity: a.key_similarity, blend: a.key_blend, source_alpha,
+        }
+    } else {
+        if source_alpha { PackedAlpha::Source } else { PackedAlpha::Opaque }
+    };
+    let transparent = source_alpha || a.color_key.is_some();
+    if a.pane.is_none() && !transparent && (a.no_video || a.no_connect) {
+        return Ok(None);
+    }
+    if a.stereo || a.no_video || (transparent && a.vf.is_some()) {
+        return Err("GFX1 output requires mono video; transparency does not support --vf".into());
+    }
+    let format = if transparent { PaneFormat::Bgra } else { PaneFormat::OpaqueBgra };
+    let pane = match &a.pane {
+        Some(spec) => Pane { format, ..parse_pane_geometry(spec)? },
+        None => Pane { x: 0, y: 0, width: session::PANEL_W as u16, height: session::PANEL_H as u16, format },
+    };
+    pane.payload(Info { fb_w: session::PANEL_W as u16, fb_h: session::PANEL_H as u16,
+                        flags: EP_INFO_PANE_BGRA | eyepiece_link::proto::EP_INFO_PANE_OPAQUE_BGRA, ..Info::default() }).map_err(str::to_string)?;
+    pane.encoded_size().map_err(str::to_string)?;
+    Ok(Some(PaneConfig { pane, alpha }))
 }
 
 #[allow(dead_code)]
@@ -285,8 +399,8 @@ fn log_fn() -> LogFn {
     Arc::new(|s: String| eprintln!("[eyepiece-pc] {s}"))
 }
 
-fn ffmpeg_level(s: &str) -> i32 {
-    match s {
+fn ffmpeg_level(s: &str) -> Result<i32, String> {
+    Ok(match s {
         "quiet" => -8,
         "panic" => 0,
         "fatal" => 8,
@@ -295,11 +409,30 @@ fn ffmpeg_level(s: &str) -> i32 {
         "info" => 32,
         "verbose" => 40,
         "debug" => 48,
-        _ => 24,
-    }
+        _ => return Err(format!("invalid --ffmpeg-log {s}")),
+    })
 }
 
-fn build_source(a: &Args) -> Result<SourceKind, String> {
+fn validate_numeric_options(a: &Args) -> Result<(), String> {
+    if !(1..=240).contains(&a.fps) {
+        return Err("--fps must be 1..240".into());
+    }
+    if !(1..=32).contains(&a.slices) {
+        return Err("--slices must be 1..32".into());
+    }
+    if !a.vbv_frames.is_finite() || !(0.1..=60.0).contains(&a.vbv_frames) {
+        return Err("--vbv-frames must be 0.1..60".into());
+    }
+    if !a.stats_interval.is_finite() || !(0.1..=60.0).contains(&a.stats_interval) {
+        return Err("--stats-interval must be 0.1..60".into());
+    }
+    if a.duration.is_some_and(|duration| !duration.is_finite() || duration < 0.0) {
+        return Err("--duration must be a finite non-negative number".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn build_source(a: &Args) -> Result<SourceKind, String> {
     Ok(match a.source.as_str() {
         #[cfg(target_os = "linux")]
         "kms" => SourceKind::Kms {
@@ -318,8 +451,8 @@ fn build_source(a: &Args) -> Result<SourceKind, String> {
         "pipewire" => SourceKind::PipeWire { restore_token_file: a.restore_token.clone(), cursor: a.cursor },
         #[cfg(windows)]
         "dxgi" => {
-            let (ad, out) = a.dxgi.split_once(',').unwrap_or(("0", "0"));
-            SourceKind::Dxgi { adapter: ad.parse().unwrap_or(0), output: out.parse().unwrap_or(0) }
+            let (adapter, output) = parse_dxgi(&a.dxgi)?;
+            SourceKind::Dxgi { adapter, output }
         }
         #[cfg(target_os = "macos")]
         "screencapturekit" | "sck" => SourceKind::ScreenCaptureKit { display_id: a.display_id, cursor: a.cursor },
@@ -331,7 +464,23 @@ fn build_source(a: &Args) -> Result<SourceKind, String> {
 
 /// The `eyepiece-pc` binary.
 pub fn main() {
-    let a = Args::parse();
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--rpc")) {
+        if let Err(e) = crate::rpc::run() {
+            eprintln!("[eyepiece-pc] RPC error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    let matches = Args::command().get_matches();
+    let overrides = explicit_options(&matches);
+    let a = Args::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
+    if a.web {
+        if let Err(e) = crate::rpc::run_web(a, overrides) {
+            eprintln!("[eyepiece-pc] RPC error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let log = log_fn();
     if let Err(e) = real_main(a, log.clone()) {
         log(format!("error: {e}"));
@@ -393,8 +542,10 @@ fn limit_privileges(a: &Args) -> Result<(), String> {
 
 fn validate_transport(mode: &str) -> Result<(), String> {
     match mode {
-        "auto" | "usb-bulk" | "usb-net" | "adb" => Ok(()),
-        _ => Err(format!("--transport {mode}: expected auto | usb-bulk | usb-net | adb")),
+        "auto" | "usb-bulk" | "adb" => Ok(()),
+        _ => Err(format!(
+            "--transport {mode}: expected auto | usb-bulk | adb"
+        )),
     }
 }
 
@@ -406,91 +557,39 @@ fn pick_connection(a: &Args, log: &dyn Fn(String)) -> Result<(String, LinkTransp
         return Ok((a.host.clone(), LinkTransport::Tcp));
     }
     match mode {
-        "usb-bulk" => Ok((a.host.clone(), LinkTransport::UsbBulk { serial: a.serial.clone() })),
-        "usb-net" => Ok((pick_usb_net(a, true, log)?, LinkTransport::Tcp)),
+        "usb-bulk" => Ok((
+            a.host.clone(),
+            LinkTransport::UsbBulk {
+                serial: a.serial.clone(),
+            },
+        )),
         "auto" => match eyepiece_link::usb::probe(a.serial.as_deref()) {
             Ok(()) => {
-                let quiet = |_: String| {};
-                let fallback = pick_usb_net(a, false, &quiet)?;
-                log("transport selection: USB bulk preferred; USB network/ADB kept as fallback".into());
-                Ok((fallback, LinkTransport::Auto { serial: a.serial.clone() }))
+                log("transport selection: USB bulk preferred; ADB kept as fallback".into());
+                Ok((
+                    a.host.clone(),
+                    LinkTransport::Auto {
+                        serial: a.serial.clone(),
+                    },
+                ))
             }
             Err(reason) => {
-                log(format!("NOTICE: USB bulk unavailable ({reason}); using existing USB-network/ADB selection."));
-                Ok((pick_usb_net(a, false, log)?, LinkTransport::Tcp))
+                log(format!(
+                    "NOTICE: USB bulk unavailable ({reason}); using ADB."
+                ));
+                Ok((a.host.clone(), LinkTransport::Tcp))
             }
         },
         _ => unreachable!(),
     }
 }
 
-/// Linux: find the goggles' RNDIS interface in sysfs and check that it has its address, so
-/// a present but unconfigured interface gets a "connect the network" notice.
-#[cfg(target_os = "linux")]
-fn pick_usb_net(a: &Args, strict: bool, log: &dyn Fn(String)) -> Result<String, String> {
-    use eyepiece_link::net;
-    // right after the bridge's USB switch the interface appears and DHCP needs a moment
-    let wait = Duration::from_secs(if strict { 15 } else { 4 });
-    match net::wait_usb_net(wait) {
-        Some(n) if n.configured => {
-            log(format!(
-                "data link: goggles' USB network ({} → {})",
-                n.ifname,
-                net::GOGGLES_ADDR
-            ));
-            Ok(net::GOGGLES_ADDR.into())
-        }
-        Some(n) => {
-            let msg = format!(
-                "the goggles' USB network ({}) is not connected on this PC. Add it once in your \
-                 network settings as a wired connection with \"connect automatically\" on \
-                 (automatic/DHCP: the goggles hand out the address) for ~2–4 ms lower latency",
-                n.ifname
-            );
-            if strict {
-                return Err(msg);
-            }
-            log(format!("NOTICE: {msg}. Using adb meanwhile."));
-            Ok(a.host.clone())
-        }
-        None if strict => Err("the goggles' USB network was not found on this PC \
-            (bridge started without it, or an older bridge)"
-            .into()),
-        None => {
-            log("data link: adb forward (no USB network from the goggles)".into());
-            Ok(a.host.clone())
-        }
-    }
-}
-
-/// Windows, macOS, …: no interface lookup; the goggles must answer on their address
-/// (driver bound, DHCP done). Untested on these systems.
-#[cfg(not(target_os = "linux"))]
-fn pick_usb_net(a: &Args, strict: bool, log: &dyn Fn(String)) -> Result<String, String> {
-    use eyepiece_link::net;
-    let wait = Duration::from_secs(if strict { 20 } else { 6 });
-    if net::wait_goggles_reachable(wait) {
-        log(format!(
-            "data link: goggles' USB network ({})",
-            net::GOGGLES_ADDR
-        ));
-        return Ok(net::GOGGLES_ADDR.into());
-    }
-    let why = if cfg!(target_os = "macos") {
-        "macOS has no built-in driver for it (RNDIS)"
-    } else if cfg!(windows) {
-        "Windows needs its RNDIS driver bound to the goggles' network interface (Device Manager)"
-    } else {
-        "the PC needs an RNDIS driver and DHCP on it"
-    };
-    let msg = format!("the goggles' USB network did not come up on this PC ({why})");
-    if strict {
-        return Err(msg);
-    }
-    log(format!(
-        "NOTICE: {msg}. Using adb. Turn off \"USB network\" (--transport adb) to skip this check."
-    ));
-    Ok(a.host.clone())
+fn explicit_options(matches: &ArgMatches) -> std::collections::HashSet<String> {
+    Args::command()
+        .get_arguments()
+        .filter(|arg| matches.value_source(arg.get_id().as_str()) == Some(ValueSource::CommandLine))
+        .map(|arg| arg.get_id().as_str().to_owned())
+        .collect()
 }
 
 /// HEVC on macOS: VideoToolbox HEVC costs about 0.3 ms more encode than H.264 there but
@@ -517,7 +616,8 @@ pub struct Prepared {
 pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
     #[cfg(target_os = "linux")]
     limit_privileges(a)?;
-    eyepiece_av::ffi::set_log_level(ffmpeg_level(&a.ffmpeg_log));
+    validate_numeric_options(a)?;
+    eyepiece_av::ffi::set_log_level(ffmpeg_level(&a.ffmpeg_log)?);
     #[cfg(target_os = "linux")]
     if a.list {
         print!("{}", eyepiece_capture::kms::list(&a.kms_device)?);
@@ -529,6 +629,7 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
         return Ok(None);
     }
     let codec: Codec = a.codec.parse()?;
+    let pane = pane_config(a)?;
     let bitrate = parse_rate(&a.bitrate)?;
     let sync: SyncMode = a.sync.parse()?;
     let mut opts = vec![];
@@ -540,6 +641,9 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
     }
     // the 3D display timing refreshes at ~60 Hz
     let fps = if a.stereo { a.fps.min(60) } else { a.fps };
+    if bitrate as f64 * a.vbv_frames / f64::from(fps) > f64::from(i32::MAX) {
+        return Err("--bitrate and --vbv-frames exceed the encoder buffer limit".into());
+    }
     let enc = EncoderConfig {
         codec,
         encoder: a.encoder.clone(),
@@ -561,15 +665,13 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
         validate_transport(&a.transport)?;
         if !a.no_deploy {
             let bridge = a.bridge.clone().or_else(find_bridge);
-            let usb_net = matches!(a.transport.as_str(), "auto" | "usb-net");
             let usb_bulk = matches!(a.transport.as_str(), "auto" | "usb-bulk");
-            adb.deploy(
-                bridge.as_deref(),
-                &a.bridge_args,
-                usb_net,
-                usb_bulk,
-                &**log,
-            )?;
+            let bridge_args = if pane.is_some() {
+                format!("{}{}", a.bridge_args, if a.reconnect { " -R" } else { "" })
+            } else {
+                a.bridge_args.clone()
+            };
+            adb.deploy(bridge.as_deref(), &bridge_args, usb_bulk, &**log)?;
         } else if !a.no_forward && !adb.bridge_running() {
             log(
                 "no eyepiece_bridge running on the goggles: start Eyepiece from the goggles' menu \
@@ -595,10 +697,7 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
         head_tracking: a.head_tracking || a.no_video || a.print_pose,
     });
     let preview = match &a.preview {
-        Some(p) => {
-            let (x, y) = p.split_once(',').unwrap_or((p, "0"));
-            Some((x.parse().unwrap_or(0), y.parse().unwrap_or(0)))
-        }
+        Some(p) => Some(parse_preview_position(p)?),
         None => None,
     };
     let cfg = Config {
@@ -613,13 +712,17 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
         video: !a.no_video,
         link,
         reconnect: a.reconnect,
-        stop_bridge: a.stop_bridge,
+        stop_bridge: a.stop_bridge || (a.reconnect && !a.no_deploy && !a.no_connect),
         dump: a.dump.clone(),
         preview,
         stats_interval: a.stats_interval,
+        stats_window: None,
         max_frames: a.frames,
         duration_s: a.duration,
         stereo: a.stereo,
+        pane,
+        gui_opacity: a.gui_opacity,
+        pane_opacity: a.pane_opacity,
     };
     Ok(Some(Prepared {
         cfg,
@@ -631,10 +734,13 @@ pub fn prepare(a: &Args, log: &LogFn) -> Result<Option<Prepared>, String> {
 /// Run the session (blocks until it ends), then the post-session safety step of `--deploy`.
 pub fn run_prepared(p: Prepared, ctl: Arc<Control>, ev: Events) -> Result<(), String> {
     let log = ev.log.clone();
+    let persistent_bridge = p.deployed && p.cfg.reconnect;
     let res = session::run(p.cfg, ctl, ev);
     if p.deployed {
-        // the -1 bridge exits with the session; make sure the MCU attitude stream is off
         std::thread::sleep(std::time::Duration::from_secs(3));
+        if persistent_bridge && p.adb.bridge_running() {
+            log("WARNING: a bridge is still running; stop the reconnect bridge on the goggles if the session ended disconnected".into());
+        }
         if let Some(l) = p.adb.mcu_stop_safety() {
             log(l);
         }
@@ -718,10 +824,138 @@ mod tests {
     }
 
     #[test]
-    fn usb_bulk_transport_option_parses() {
+    fn usb_transport_options_reject_removed_network_mode() {
         let args = Args::try_parse_from(["eyepiece-pc", "--transport", "usb-bulk"]).unwrap();
         assert_eq!(args.transport, "usb-bulk");
         validate_transport(&args.transport).unwrap();
+        assert!(validate_transport("usb-net").is_err());
         assert!(validate_transport("bad").is_err());
+    }
+
+    #[test]
+    fn bitrate_parser_rejects_non_finite_and_non_positive_values() {
+        for rate in ["0", "-1", "NaN", "inf", "9223372036854775808"] {
+            assert!(parse_rate(rate).is_err(), "{rate}");
+        }
+        assert_eq!(parse_rate("20M").unwrap(), 20_000_000);
+    }
+
+    #[test]
+    fn numeric_options_reject_values_that_can_panic_or_spin() {
+        let valid = Args::default();
+        validate_numeric_options(&valid).unwrap();
+        for args in [
+            Args { fps: 0, ..valid.clone() },
+            Args { slices: 0, ..valid.clone() },
+            Args { vbv_frames: f64::NAN, ..valid.clone() },
+            Args { stats_interval: 0.0, ..valid.clone() },
+            Args { stats_interval: f64::INFINITY, ..valid.clone() },
+            Args { duration: Some(f64::NAN), ..valid.clone() },
+            Args { duration: Some(-1.0), ..valid },
+        ] {
+            assert!(validate_numeric_options(&args).is_err());
+        }
+        assert!(ffmpeg_level("unknown").is_err());
+        assert_eq!(ffmpeg_level("warning").unwrap(), 24);
+    }
+
+    #[test]
+    fn preview_position_rejects_malformed_coordinates() {
+        assert_eq!(parse_preview_position("10,-20").unwrap(), (10, -20));
+        assert_eq!(parse_preview_position("10").unwrap(), (10, 0));
+        for value in ["x,20", "10,y", "10,20,30"] {
+            assert!(parse_preview_position(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn dxgi_requires_two_valid_indices() {
+        assert_eq!(parse_dxgi("2,3").unwrap(), (2, 3));
+        for value in ["2", "x,3", "2,y", "2,3,4"] {
+            assert!(parse_dxgi(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn web_flag_parses_with_regular_options() {
+        let matches = Args::command()
+            .try_get_matches_from(["eyepiece-pc", "--source", "test", "--no-connect", "--web"])
+            .unwrap();
+        let overrides = explicit_options(&matches);
+        let args = Args::from_arg_matches(&matches).unwrap();
+        assert!(args.web);
+        assert_eq!(args.source, "test");
+        assert!(args.no_connect);
+        assert!(overrides.contains("web"));
+        assert!(overrides.contains("source"));
+        assert!(overrides.contains("no_connect"));
+        assert!(!overrides.contains("fps"));
+    }
+
+    #[test]
+    fn pane_options_validate_geometry_and_key() {
+        let args = Args::try_parse_from([
+            "eyepiece-pc", "--pane", "640x480+100+50", "--color-key", "00ff00",
+            "--pane-alpha", "source",
+        ]).unwrap();
+        let pane = pane_config(&args).unwrap().unwrap();
+        assert_eq!((pane.pane.width, pane.pane.height, pane.pane.x, pane.pane.y), (640, 480, 100, 50));
+        assert!(matches!(pane.alpha, PackedAlpha::ColorKey { rgb: 0x00ff00, source_alpha: true, .. }));
+        for bad in ["640x480+1500+0", "641x480+0+0", "640x480+0+0+1", "640x480+-1+0"] {
+            let a = Args { pane: Some(bad.into()), ..Args::default() };
+            assert!(pane_config(&a).is_err(), "{bad}");
+        }
+        let a = Args { pane: Some("640x480+0+0".into()), stereo: true, ..Args::default() };
+        assert!(pane_config(&a).is_err());
+    }
+
+    #[test]
+    fn fullscreen_alpha_and_key_use_packed_full_panel() {
+        let opaque = pane_config(&Args::default()).unwrap().unwrap();
+        assert_eq!(opaque.pane.format, PaneFormat::OpaqueBgra);
+        assert_eq!(opaque.pane.encoded_size(), Ok((1920, 1080)));
+        assert!(pane_config(&Args { no_connect: true, ..Args::default() }).unwrap().is_none());
+        for options in [
+            vec!["--alpha", "source"],
+            vec!["--pane-alpha", "source"],
+            vec!["--color-key", "00ff00"],
+            vec!["--alpha", "source", "--color-key", "00ff00"],
+        ] {
+            let args = Args::try_parse_from(std::iter::once("eyepiece-pc").chain(options)).unwrap();
+            let config = pane_config(&args).unwrap().unwrap();
+            assert_eq!((config.pane.x, config.pane.y, config.pane.width, config.pane.height), (0, 0, 1920, 1080));
+            assert_eq!(config.pane.encoded_size(), Ok((3840, 1080)));
+            assert!(pane_config(&Args { stereo: true, ..args }).is_err());
+        }
+        assert!(pane_config(&Args { key_blend: 1.1, ..Args::default() }).is_err());
+        assert_eq!(pane_config(&Args { key_blend: 0.1, key_similarity: 0.1, ..Args::default() }).unwrap().unwrap().pane.format, PaneFormat::OpaqueBgra);
+        assert!(pane_config(&Args { reconnect: true, ..Args::default() }).is_ok());
+        assert!(pane_config(&Args { stereo: true, ..Args::default() }).is_err());
+    }
+
+    #[test]
+    fn disabling_transparency_uses_unpacked_output_with_or_without_pip() {
+        for pane in [None, Some("640x480+100+50".to_string())] {
+            for key in [false, true] {
+                let mut args = Args { pane: pane.clone(), ..Args::default() };
+                if key {
+                    args.color_key = Some("00ff00".into());
+                } else {
+                    args.alpha = "source".into();
+                }
+                let transparent = pane_config(&args).unwrap().unwrap();
+                assert_eq!(transparent.pane.format, PaneFormat::Bgra);
+
+                args.alpha = "opaque".into();
+                args.color_key = None;
+                let opaque = pane_config(&args).unwrap().unwrap();
+                assert_eq!(opaque.pane.format, PaneFormat::OpaqueBgra);
+                assert!(matches!(opaque.alpha, PackedAlpha::Opaque));
+                assert_eq!(
+                    opaque.pane.encoded_size(),
+                    Ok((opaque.pane.width, opaque.pane.height))
+                );
+            }
+        }
     }
 }
