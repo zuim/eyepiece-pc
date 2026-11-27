@@ -28,6 +28,7 @@
     changeSetting,
     discoverKmsOutputs,
     browseVideoFile,
+    requestReset,
   }: {
     schema: Schema | undefined;
     values: Record<string, unknown>;
@@ -41,6 +42,7 @@
     changeSetting: (setting: Setting, value: unknown) => Promise<void>;
     discoverKmsOutputs: () => Promise<void>;
     browseVideoFile: () => Promise<void>;
+    requestReset: () => void;
   } = $props();
 
   const videoSettings = ["encoder", "codec", "bitrate", "fps"];
@@ -73,6 +75,9 @@
       <h2>Stream Controls</h2>
     </div>
     <div class="control-actions">
+      <button class="secondary reset-button" disabled={!workerConnected} onclick={requestReset}
+        ><Icon name="restart" /> Reset Settings</button
+      >
       <div class="stream-state-control" class:restart-pending={settingsChanged} role="group" aria-label="Stream state">
         <button
           class:danger={running}
@@ -354,9 +359,25 @@
   .video-group {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+  .start-button {
+    min-width: 200px;
+    padding: 14px 26px;
+    font-size: 16px;
+    box-shadow: 0 0 0 1px #9cddc933, 0 6px 22px #9cddc940;
+  }
+  .start-button:not(.danger):not(:disabled) {
+    background: #7fe0bf;
+  }
+  .start-button:not(.danger):not(:disabled):hover {
+    background: #a6f0d6;
+  }
+  .control-actions {
+    align-items: center;
+  }
   .start-button.danger {
     background: #4a2d2b;
     color: #ffc2ad;
+    box-shadow: 0 0 0 1px #ffc2ad33;
   }
   @media (max-width: 1100px) {
     .control-groups {
