@@ -49,21 +49,17 @@ pub fn preset_of(a: &Args) -> Option<usize> {
     PRESETS.iter().position(|p| p.2 == codec && p.3.eq_ignore_ascii_case(&a.bitrate))
 }
 
-/// The GUI's *USB network* switch over `--transport`: on = `auto` (the goggles' USB network,
-/// adb when it does not come up; `usb-net` from Advanced also counts as on), off = `adb`.
-pub fn usb_net(a: &Args) -> bool {
+/// The simple USB switch: on = automatic USB transport, off = adb only.
+pub fn usb_link(a: &Args) -> bool {
     a.transport != "adb"
 }
 
-pub fn set_usb_net(a: &mut Args, on: bool) {
-    if on != usb_net(a) {
-        a.transport = if on { "auto" } else { "adb" }.into();
-    }
+pub fn set_usb_link(a: &mut Args, on: bool) {
+    a.transport = if on { "auto" } else { "adb" }.into();
 }
 
-pub const USB_NET_HINT: &str = "Stream over the goggles' USB network (RNDIS): about 2–4 ms lower latency \
-     than adb. Falls back to adb with a notice when the network does not come up on this PC. \
-     Off: adb only, the goggles' USB is left as it is.";
+pub const USB_LINK_HINT: &str = "Auto prefers the dedicated USB bulk link, then RNDIS, then adb. \
+     USB bulk and RNDIS need a bridge with matching support. Off: adb only.";
 
 /// Measured numbers of a pin: means over the pinned window of the per-interval values
 /// (percentiles are per stats interval, then averaged).
@@ -284,19 +280,21 @@ mod tests {
     }
 
     #[test]
-    fn usb_net_switch() {
+    fn usb_link_switch() {
         let d = Saved::default();
-        assert!(usb_net(&d.args), "USB network is on by default");
+        assert!(usb_link(&d.args), "USB transport is automatic by default");
         assert!(!d.args.head_tracking, "head tracking is off by default");
         let mut a = Args::default();
-        set_usb_net(&mut a, false);
+        set_usb_link(&mut a, false);
         assert_eq!(a.transport, "adb");
         assert_eq!(command_line(&a), "eyepiece-pc --transport=adb");
-        set_usb_net(&mut a, true);
+        set_usb_link(&mut a, true);
         assert_eq!(a.transport, "auto");
         a.transport = "usb-net".into();
-        set_usb_net(&mut a, true);
-        assert_eq!(a.transport, "usb-net", "strict mode from Advanced is kept");
+        set_usb_link(&mut a, true);
+        assert_eq!(a.transport, "auto", "simple USB selection uses automatic mode");
+        a.transport = "usb-bulk".into();
+        assert!(usb_link(&a));
     }
 
     #[test]

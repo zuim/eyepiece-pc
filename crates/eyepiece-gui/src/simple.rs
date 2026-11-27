@@ -250,9 +250,9 @@ impl App {
 
                     // ---- data link ----
                     ui.label(RichText::new("Connection").strong());
-                    let mut on = settings::usb_net(&self.saved.args);
-                    if ui.checkbox(&mut on, "USB network (faster)").on_hover_text(settings::USB_NET_HINT).changed() {
-                        settings::set_usb_net(&mut self.saved.args, on);
+                    let mut on = settings::usb_link(&self.saved.args);
+                    if ui.checkbox(&mut on, "USB (auto)").on_hover_text(settings::USB_LINK_HINT).changed() {
+                        settings::set_usb_link(&mut self.saved.args, on);
                     }
                     ui.end_row();
 

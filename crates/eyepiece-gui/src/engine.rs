@@ -36,7 +36,7 @@ pub struct EngineShared {
     pub facts: Mutex<Vec<String>>,
     /// last "NOTICE: …" log line (something the user should do, e.g. connect the USB network)
     pub notice: Mutex<Option<String>>,
-    /// "USB network" / "adb", from the session's `data link:` log line
+    /// actual USB bulk, USB network, TCP, or adb transport
     pub data_link: Mutex<Option<String>>,
 }
 
@@ -74,7 +74,15 @@ impl Engine {
                     }
                 }
                 if let Some(d) = s.strip_prefix("data link: ") {
-                    let l = if d.contains("USB network") { "USB network" } else { "adb" };
+                    let l = if d.contains("USB bulk") {
+                        "USB bulk"
+                    } else if d.contains("USB network") {
+                        "USB network"
+                    } else if d.contains("TCP") {
+                        "TCP"
+                    } else {
+                        "adb"
+                    };
                     *sh.data_link.lock().unwrap() = Some(l.into());
                 }
                 let mut l = sh.log.lock().unwrap();

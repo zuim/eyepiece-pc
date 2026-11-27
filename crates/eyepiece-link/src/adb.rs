@@ -113,9 +113,16 @@ impl Adb {
     /// running keeps the goggles black) plus `extra_args`. `bridge` = a local binary to push
     /// first; `None` = use one already on the goggles (pushed earlier, or the one natartos
     /// installed with the Eyepiece mod).
-    /// `usb_net`: ask the bridge to switch the goggles' USB to network + adb (`-U rndis`; only
-    /// bridges that know the option get it).
-    pub fn deploy(&self, bridge: Option<&Path>, extra_args: &str, usb_net: bool, log: &dyn Fn(String)) -> Result<(), String> {
+    /// Ask supported bridges to enable the requested USB transports. Older bridges keep their
+    /// existing behavior; the caller decides whether that is acceptable for the selected mode.
+    pub fn deploy(
+        &self,
+        bridge: Option<&Path>,
+        extra_args: &str,
+        usb_net: bool,
+        usb_bulk: bool,
+        log: &dyn Fn(String),
+    ) -> Result<(), String> {
         if let Err(e) = self.run(&["get-state"], true) {
             return Err(format!(
                 "ADB could not select the goggles: {e}\n\
@@ -161,6 +168,14 @@ impl Adb {
                 args = format!("-U rndis {args}");
             } else {
                 log("this eyepiece_bridge has no USB network support (older natartos): adb only".into());
+            }
+        }
+        if usb_bulk && !args.split_whitespace().any(|arg| arg == "-B") {
+            let help = self.shell(&format!("{exe} -h 2>&1; true"), false).unwrap_or_default();
+            if help.contains("-B          add a dedicated FunctionFS bulk interface") {
+                args = format!("-B {args}");
+            } else {
+                log("this eyepiece_bridge has no USB bulk support; auto mode will use USB network/ADB".into());
             }
         }
         self.stop_bridge();

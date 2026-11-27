@@ -7,5 +7,6 @@ pub mod link;
 pub mod net;
 pub mod proto;
 pub mod stats;
+pub mod usb;
 
-pub use link::{Link, LinkOptions, LogFn};
+pub use link::{Link, LinkOptions, LinkTransport, LogFn};

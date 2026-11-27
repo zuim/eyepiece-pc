@@ -4,6 +4,9 @@
 use crate::clock::mono_us;
 use crate::proto::*;
 use crate::stats::{Interval, Snapshot};
+use nusb::io::{EndpointRead, EndpointWrite};
+use nusb::transfer::{Bulk, In, Out};
+use nusb::{Device, Interface};
 use std::collections::VecDeque;
 use std::io::{IoSlice, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
@@ -14,9 +17,17 @@ use std::time::{Duration, Instant};
 pub type LogFn = Arc<dyn Fn(String) + Send + Sync>;
 
 #[derive(Clone)]
+pub enum LinkTransport {
+    Tcp,
+    UsbBulk { serial: Option<String> },
+    Auto { serial: Option<String> },
+}
+
+#[derive(Clone)]
 pub struct LinkOptions {
     /// host:port of the bridge (adb forward: 127.0.0.1:42420)
     pub addr: String,
+    pub transport: LinkTransport,
     pub connect_timeout: Duration,
     /// opentrack "UDP over network" target, e.g. 127.0.0.1:4242
     pub opentrack: Option<String>,
@@ -69,9 +80,45 @@ impl Shared {
 }
 
 pub struct Link {
-    sock: Mutex<TcpStream>,
-    raw: TcpStream,
+    sock: Mutex<Option<Writer>>,
+    raw: Option<TcpStream>,
+    _usb: Option<(Device, Interface)>,
+    transport_name: String,
+    selected_transport: LinkTransport,
     pub shared: Arc<Shared>,
+}
+
+enum Writer {
+    Tcp(TcpStream),
+    Usb(EndpointWrite<Bulk>),
+}
+
+enum Reader {
+    Tcp(TcpStream),
+    Usb(EndpointRead<Bulk>),
+}
+
+impl Writer {
+    fn write_parts(&mut self, parts: &[&[u8]]) -> std::io::Result<()> {
+        match self {
+            Writer::Tcp(stream) => write_all_vectored(stream, parts),
+            Writer::Usb(stream) => {
+                for part in parts {
+                    stream.write_all(part)?;
+                }
+                stream.flush()
+            }
+        }
+    }
+}
+
+impl Read for Reader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Reader::Tcp(stream) => stream.read(buf),
+            Reader::Usb(stream) => stream.read(buf),
+        }
+    }
 }
 
 fn connect_once(addr: &str) -> std::io::Result<TcpStream> {
@@ -85,27 +132,101 @@ fn connect_once(addr: &str) -> std::io::Result<TcpStream> {
     Err(last)
 }
 
+fn open_tcp(addr: &str, timeout: Duration) -> Result<(Writer, Reader, TcpStream), String> {
+    let t_end = Instant::now() + timeout;
+    let stream = loop {
+        match connect_once(addr) {
+            Ok(stream) => break stream,
+            Err(e) => {
+                if Instant::now() >= t_end {
+                    return Err(format!(
+                        "cannot connect to eyepiece_bridge on {addr} ({e}); is it running and is \
+                         `adb forward tcp:{p} tcp:{p}` set?",
+                        p = EP_PORT
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        }
+    };
+    stream.set_nodelay(true).ok();
+    let writer = stream.try_clone().map_err(|e| e.to_string())?;
+    let raw = stream.try_clone().map_err(|e| e.to_string())?;
+    Ok((Writer::Tcp(writer), Reader::Tcp(stream), raw))
+}
+
+fn open_usb(serial: Option<&str>) -> Result<(Writer, Reader, (Device, Interface), String), String> {
+    let usb = crate::usb::discover(serial)?;
+    let endpoints = usb.endpoints;
+    let in_endpoint = usb
+        .interface
+        .endpoint::<Bulk, In>(endpoints.in_address)
+        .map_err(|e| format!("cannot open Eyepiece bulk IN endpoint ({e})"))?;
+    let out_endpoint = usb
+        .interface
+        .endpoint::<Bulk, Out>(endpoints.out_address)
+        .map_err(|e| format!("cannot open Eyepiece bulk OUT endpoint ({e})"))?;
+    let reader = EndpointRead::new(in_endpoint, 64 * 1024)
+        .with_num_transfers(2)
+        .with_read_timeout(Duration::from_millis(100));
+    let writer = EndpointWrite::new(out_endpoint, 64 * 1024)
+        .with_write_timeout(Duration::from_secs(2));
+    let name = format!("USB bulk interface {}", endpoints.interface_number);
+    Ok((
+        Writer::Usb(writer),
+        Reader::Usb(reader),
+        (usb.device, usb.interface),
+        name,
+    ))
+}
+
+fn select_initial<T>(
+    requested: &LinkTransport,
+    open_tcp: impl FnOnce() -> Result<T, String>,
+    open_usb: impl FnOnce(Option<&str>) -> Result<T, String>,
+    log: &LogFn,
+) -> Result<(T, LinkTransport), String> {
+    match requested {
+        LinkTransport::Tcp => open_tcp().map(|opened| (opened, LinkTransport::Tcp)),
+        LinkTransport::UsbBulk { serial } => open_usb(serial.as_deref())
+            .map(|opened| (opened, LinkTransport::UsbBulk { serial: serial.clone() }))
+            .map_err(|error| format!("cannot connect via USB bulk: {error}")),
+        LinkTransport::Auto { serial } => match open_usb(serial.as_deref()) {
+            Ok(opened) => Ok((
+                opened,
+                LinkTransport::UsbBulk {
+                    serial: serial.clone(),
+                },
+            )),
+            Err(reason) => {
+                log(format!("NOTICE: USB bulk unavailable ({reason}); using TCP."));
+                open_tcp().map(|opened| (opened, LinkTransport::Tcp))
+            }
+        },
+    }
+}
+
 impl Link {
     /// Connect (retrying until `connect_timeout`) and start the receive + ping threads.
     pub fn connect(o: &LinkOptions, log: LogFn) -> Result<Arc<Link>, String> {
-        let t_end = Instant::now() + o.connect_timeout;
-        let s = loop {
-            match connect_once(&o.addr) {
-                Ok(s) => break s,
-                Err(e) => {
-                    if Instant::now() >= t_end {
-                        return Err(format!(
-                            "cannot connect to eyepiece_bridge on {} ({e}); is it running and is \
-                             `adb forward tcp:{p} tcp:{p}` set?",
-                            o.addr,
-                            p = EP_PORT
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(300));
-                }
-            }
-        };
-        s.set_nodelay(true).ok();
+        let ((writer, reader, raw, usb, transport_name), selected_transport) = select_initial(
+            &o.transport,
+            || {
+                let (writer, reader, raw) = open_tcp(&o.addr, o.connect_timeout)?;
+                Ok((
+                    writer,
+                    reader,
+                    Some(raw),
+                    None,
+                    format!("TCP {}", o.addr),
+                ))
+            },
+            |serial| {
+                let (writer, reader, usb, name) = open_usb(serial)?;
+                Ok((writer, reader, None, Some(usb), name))
+            },
+            &log,
+        )?;
         let ot = match &o.opentrack {
             Some(a) if !a.is_empty() => {
                 let addr = a
@@ -133,13 +254,16 @@ impl Link {
             log,
         });
         let link = Arc::new(Link {
-            raw: s.try_clone().map_err(|e| e.to_string())?,
-            sock: Mutex::new(s.try_clone().map_err(|e| e.to_string())?),
+            raw,
+            sock: Mutex::new(Some(writer)),
+            _usb: usb,
+            transport_name,
+            selected_transport,
             shared,
         });
         {
             let l = link.clone();
-            let rx = s;
+            let rx = reader;
             std::thread::Builder::new().name("ep-rx".into()).spawn(move || l.rx_loop(rx)).unwrap();
         }
         {
@@ -156,32 +280,55 @@ impl Link {
         self.shared.alive.load(Ordering::Relaxed)
     }
 
+    pub fn transport_name(&self) -> &str {
+        &self.transport_name
+    }
+
+    pub fn selected_transport(&self) -> LinkTransport {
+        self.selected_transport.clone()
+    }
+
     pub fn close(&self) {
         self.shared.alive.store(false, Ordering::Relaxed);
-        let _ = self.raw.shutdown(std::net::Shutdown::Both);
+        self.shutdown_io();
     }
 
     fn fail(&self, e: std::io::Error) -> std::io::Error {
         if self.shared.alive.swap(false, Ordering::Relaxed) {
             (self.shared.log)(format!("connection to goggles closed ({e})"));
         }
+        self.shutdown_io();
         e
+    }
+
+    fn shutdown_io(&self) {
+        if let Some(raw) = &self.raw {
+            let _ = raw.shutdown(std::net::Shutdown::Both);
+        }
+        self.sock.lock().unwrap().take();
+    }
+
+    fn write_parts(&self, parts: &[&[u8]]) -> std::io::Result<()> {
+        let result = {
+            let mut writer = self.sock.lock().unwrap();
+            match writer.as_mut() {
+                Some(writer) => writer.write_parts(parts),
+                None => Err(std::io::ErrorKind::BrokenPipe.into()),
+            }
+        };
+        result.map_err(|e| self.fail(e))
     }
 
     pub fn send(&self, mtype: u8, flags: u8, payload: &[u8]) -> std::io::Result<()> {
         let h = header(mtype, flags, payload.len() as u32);
-        let mut s = self.sock.lock().unwrap();
-        write_all_vectored(&mut s, &[&h, payload]).map_err(|e| self.fail(e))
+        self.write_parts(&[&h, payload])
     }
 
     /// EP_VIDEO without copying the AU (header + ep_video_t + AU in one writev).
     pub fn send_video(&self, pts_us: u64, codec: u8, key: bool, au: &[u8]) -> std::io::Result<()> {
         let pre = video_prefix(pts_us, codec);
         let h = header(EP_VIDEO, if key { EP_FLAG_KEY } else { 0 }, (pre.len() + au.len()) as u32);
-        {
-            let mut s = self.sock.lock().unwrap();
-            write_all_vectored(&mut s, &[&h, &pre, au]).map_err(|e| self.fail(e))?;
-        }
+        self.write_parts(&[&h, &pre, au])?;
         let now = mono_us();
         if self.shared.unacked.fetch_add(1, Ordering::Relaxed) == 0 {
             self.shared.t_first_unacked.store(now, Ordering::Relaxed);
@@ -217,7 +364,8 @@ impl Link {
         {
             use std::os::fd::AsRawFd;
             let mut n: libc::c_int = 0;
-            let r = unsafe { libc::ioctl(self.raw.as_raw_fd(), libc::TIOCOUTQ, &mut n) };
+            let raw = self.raw.as_ref()?;
+            let r = unsafe { libc::ioctl(raw.as_raw_fd(), libc::TIOCOUTQ, &mut n) };
             if r == 0 {
                 return Some(n as usize);
             }
@@ -266,18 +414,18 @@ impl Link {
         }
     }
 
-    fn rx_loop(&self, mut s: TcpStream) {
+    fn rx_loop(&self, mut s: Reader) {
         let mut buf = Vec::new();
         let r: std::io::Result<()> = (|| {
             while self.alive() {
                 let mut h = [0u8; HDR_LEN];
-                s.read_exact(&mut h)?;
+                read_exact_active(&mut s, &mut h, &self.shared.alive)?;
                 let (t, _f, len) = parse_header(&h).ok_or_else(|| std::io::Error::other("bad magic from goggles"))?;
                 if len > EP_MAX_PAYLOAD {
                     return Err(std::io::Error::other("oversized message from goggles"));
                 }
                 buf.resize(len as usize, 0);
-                s.read_exact(&mut buf)?;
+                read_exact_active(&mut s, &mut buf, &self.shared.alive)?;
                 self.handle(t, &buf);
             }
             Ok(())
@@ -366,6 +514,24 @@ impl Link {
     }
 }
 
+fn read_exact_active<R: Read>(reader: &mut R, buf: &mut [u8], alive: &AtomicBool) -> std::io::Result<()> {
+    let mut offset = 0;
+    while offset < buf.len() {
+        if !alive.load(Ordering::Relaxed) {
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
+        match reader.read(&mut buf[offset..]) {
+            Ok(0) if !alive.load(Ordering::Relaxed) => return Err(std::io::ErrorKind::Interrupted.into()),
+            Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            Ok(n) => offset += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut && alive.load(Ordering::Relaxed) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 
 /// writev until everything is written (std's write_all_vectored is unstable).
 fn write_all_vectored(s: &mut TcpStream, parts: &[&[u8]]) -> std::io::Result<()> {
@@ -390,4 +556,239 @@ fn write_all_vectored(s: &mut TcpStream, parts: &[&[u8]]) -> std::io::Result<()>
         off += n;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    enum ReadStep {
+        Data(Vec<u8>),
+        Timeout,
+    }
+
+    struct FragmentedReader {
+        steps: VecDeque<ReadStep>,
+        pending: VecDeque<u8>,
+    }
+
+    impl Read for FragmentedReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.pending.is_empty() {
+                match self.steps.pop_front() {
+                    Some(ReadStep::Data(bytes)) => self.pending.extend(bytes),
+                    Some(ReadStep::Timeout) => return Err(std::io::ErrorKind::TimedOut.into()),
+                    None => return Ok(0),
+                }
+            }
+            let len = buf.len().min(self.pending.len());
+            for byte in &mut buf[..len] {
+                *byte = self.pending.pop_front().unwrap();
+            }
+            Ok(len)
+        }
+    }
+
+    #[test]
+    fn exact_read_preserves_fragments_across_timeouts() {
+        let mut reader = FragmentedReader {
+            steps: [
+                ReadStep::Data(vec![1, 2]),
+                ReadStep::Timeout,
+                ReadStep::Data(vec![3]),
+                ReadStep::Timeout,
+                ReadStep::Data(vec![4, 5]),
+            ]
+            .into(),
+            pending: VecDeque::new(),
+        };
+        let alive = AtomicBool::new(true);
+        let mut bytes = [0; 5];
+
+        read_exact_active(&mut reader, &mut bytes, &alive).unwrap();
+
+        assert_eq!(bytes, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn exact_read_reassembles_max_payload_across_unaligned_fragments() {
+        let payload_len = EP_MAX_PAYLOAD as usize;
+        let fragment_sizes = [1, 511, 512, 513, 65_535, 65_536];
+        let mut steps = VecDeque::new();
+        let mut expected = Vec::new();
+        let mut offset = 0;
+        let mut fragment_index = 0;
+        while offset < payload_len {
+            let fragment_len = fragment_sizes[fragment_index % fragment_sizes.len()]
+                .min(payload_len - offset);
+            let value = fragment_index as u8;
+            steps.push_back(ReadStep::Data(vec![value; fragment_len]));
+            steps.push_back(ReadStep::Timeout);
+            expected.push((offset, fragment_len, value));
+            offset += fragment_len;
+            fragment_index += 1;
+        }
+
+        let mut reader = FragmentedReader { steps, pending: VecDeque::new() };
+        let alive = AtomicBool::new(true);
+        let mut payload = vec![0; payload_len];
+        read_exact_active(&mut reader, &mut payload, &alive).unwrap();
+
+        for (offset, fragment_len, value) in expected {
+            assert!(payload[offset..offset + fragment_len]
+                .iter()
+                .all(|byte| *byte == value));
+        }
+    }
+
+    #[test]
+    fn exact_read_stops_after_cancellation() {
+        let mut reader = FragmentedReader { steps: VecDeque::new(), pending: VecDeque::new() };
+        let alive = AtomicBool::new(false);
+
+        let error = read_exact_active(&mut reader, &mut [0; 1], &alive).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn concurrent_sends_keep_message_frames_serialized() {
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+        use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = TcpStream::connect(address).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        let shared = Arc::new(Shared {
+            alive: AtomicBool::new(true),
+            clock: Mutex::new(ClockSync::default()),
+            stats: Mutex::new(Interval::default()),
+            info: Mutex::new(None),
+            last_pose: Mutex::new(None),
+            key_request: AtomicBool::new(false),
+            unacked: AtomicU32::new(0),
+            t_first_unacked: AtomicU64::new(0),
+            last_forced_idr: AtomicU64::new(0),
+            opentrack: None,
+            print_pose: false,
+            log: Arc::new(|_| {}),
+        });
+        let raw = client.try_clone().unwrap();
+        let link = Arc::new(Link {
+            sock: Mutex::new(Some(Writer::Tcp(client))),
+            raw: Some(raw),
+            _usb: None,
+            transport_name: "TCP test".into(),
+            selected_transport: LinkTransport::Tcp,
+            shared,
+        });
+
+        const THREADS: usize = 6;
+        const MESSAGES_PER_THREAD: usize = 12;
+        const PAYLOAD_LEN: usize = 2048;
+        let receive = thread::spawn(move || {
+            for _ in 0..THREADS * MESSAGES_PER_THREAD {
+                let mut header_bytes = [0; HDR_LEN];
+                peer.read_exact(&mut header_bytes).unwrap();
+                let (message_type, _, len) = parse_header(&header_bytes).unwrap();
+                assert_eq!(message_type, 0x40);
+                assert_eq!(len as usize, PAYLOAD_LEN);
+                let mut payload = vec![0; len as usize];
+                peer.read_exact(&mut payload).unwrap();
+                assert!(payload.iter().all(|byte| *byte == payload[0]));
+            }
+        });
+        let senders: Vec<_> = (0..THREADS)
+            .map(|thread_id| {
+                let link = link.clone();
+                thread::spawn(move || {
+                    let payload = vec![thread_id as u8; PAYLOAD_LEN];
+                    for _ in 0..MESSAGES_PER_THREAD {
+                        link.send(0x40, 0, &payload).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for sender in senders {
+            sender.join().unwrap();
+        }
+        receive.join().unwrap();
+        link.close();
+    }
+
+    #[test]
+    fn auto_falls_back_to_tcp_before_session_start() {
+        let requested = LinkTransport::Auto { serial: None };
+        let tcp_calls = AtomicU32::new(0);
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let captured = messages.clone();
+        let log: LogFn = Arc::new(move |message| captured.lock().unwrap().push(message));
+
+        let (selected, actual) = select_initial(
+            &requested,
+            || {
+                tcp_calls.fetch_add(1, Ordering::Relaxed);
+                Ok("tcp")
+            },
+            |_| Err("USB interface inaccessible".into()),
+            &log,
+        )
+        .unwrap();
+
+        assert_eq!(selected, "tcp");
+        assert!(matches!(actual, LinkTransport::Tcp));
+        assert_eq!(tcp_calls.load(Ordering::Relaxed), 1);
+        assert!(messages.lock().unwrap()[0].contains("USB interface inaccessible"));
+    }
+
+    #[test]
+    fn auto_prefers_bulk_without_opening_tcp() {
+        let requested = LinkTransport::Auto {
+            serial: Some("serial".into()),
+        };
+        let tcp_opened = AtomicBool::new(false);
+        let log: LogFn = Arc::new(|_| {});
+
+        let (selected, actual) = select_initial(
+            &requested,
+            || {
+                tcp_opened.store(true, Ordering::Relaxed);
+                Ok("tcp")
+            },
+            |serial| {
+                assert_eq!(serial, Some("serial"));
+                Ok("bulk")
+            },
+            &log,
+        )
+        .unwrap();
+
+        assert_eq!(selected, "bulk");
+        assert!(matches!(actual, LinkTransport::UsbBulk { .. }));
+        assert!(!tcp_opened.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn explicit_bulk_does_not_fall_back_to_tcp() {
+        let requested = LinkTransport::UsbBulk { serial: None };
+        let tcp_opened = AtomicBool::new(false);
+        let log: LogFn = Arc::new(|_| {});
+
+        let result = select_initial(
+            &requested,
+            || {
+                tcp_opened.store(true, Ordering::Relaxed);
+                Ok("tcp")
+            },
+            |_| Err("no matching interface".into()),
+            &log,
+        );
+
+        assert!(matches!(result, Err(error) if error.contains("no matching interface")));
+        assert!(!tcp_opened.load(Ordering::Relaxed));
+    }
 }

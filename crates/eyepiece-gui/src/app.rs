@@ -486,14 +486,14 @@ impl App {
                 ui.radio_value(&mut a.no_deploy, true, "use running (goggles menu)");
             });
             ui.end_row();
-            ui.label("Data link").on_hover_text(settings::USB_NET_HINT);
+            ui.label("Data link").on_hover_text(settings::USB_LINK_HINT);
             ui.horizontal(|ui| {
-                let on = settings::usb_net(a);
-                if ui.radio(on, "USB network (faster)").on_hover_text(settings::USB_NET_HINT).clicked() {
-                    settings::set_usb_net(a, true);
+                let on = settings::usb_link(a);
+                if ui.radio(on, "USB (auto)").on_hover_text(settings::USB_LINK_HINT).clicked() {
+                    settings::set_usb_link(a, true);
                 }
                 if ui.radio(!on, "adb").on_hover_text("adb forward only; the goggles' USB is left as it is").clicked() {
-                    settings::set_usb_net(a, false);
+                    settings::set_usb_link(a, false);
                 }
             });
             ui.end_row();
@@ -870,7 +870,8 @@ impl App {
             row(ui, "data link", |ui| {
                 egui::ComboBox::from_id_salt("transport").selected_text(a.transport.as_str()).show_ui(ui, |ui| {
                     for (v, h) in [
-                        ("auto", "goggles' USB network when connected, else adb"),
+                        ("auto", "USB bulk, then USB network, then adb"),
+                        ("usb-bulk", "USB bulk only; errors if unavailable"),
                         ("usb-net", "USB network only"),
                         ("adb", "adb forward only"),
                     ] {
