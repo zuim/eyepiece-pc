@@ -153,6 +153,7 @@ export const eyepiece = $root.eyepiece = (() => {
                  * @property {eyepiece.rpc.v1.ISetPreview|null} [setPreview] Envelope setPreview
                  * @property {eyepiece.rpc.v1.ISetCommandLine|null} [setCommandLine] Envelope setCommandLine
                  * @property {eyepiece.rpc.v1.IListKmsOutputs|null} [listKmsOutputs] Envelope listKmsOutputs
+                 * @property {eyepiece.rpc.v1.ISetGogglesSetting|null} [setGogglesSetting] Envelope setGogglesSetting
                  * @property {eyepiece.rpc.v1.IState|null} [state] Envelope state
                  * @property {eyepiece.rpc.v1.IError|null} [error] Envelope error
                  * @property {eyepiece.rpc.v1.ILog|null} [log] Envelope log
@@ -161,6 +162,7 @@ export const eyepiece = $root.eyepiece = (() => {
                  * @property {eyepiece.rpc.v1.IPreview|null} [preview] Envelope preview
                  * @property {boolean|null} [acknowledged] Envelope acknowledged
                  * @property {eyepiece.rpc.v1.IKmsOutputs|null} [kmsOutputs] Envelope kmsOutputs
+                 * @property {eyepiece.rpc.v1.IGoggles|null} [goggles] Envelope goggles
                  * @property {eyepiece.rpc.v1.IVideo|null} [video] Envelope video
                  * @property {eyepiece.rpc.v1.IPing|null} [ping] Envelope ping
                  * @property {eyepiece.rpc.v1.IControl|null} [control] Envelope control
@@ -296,6 +298,14 @@ export const eyepiece = $root.eyepiece = (() => {
                 Envelope.prototype.listKmsOutputs = null;
 
                 /**
+                 * Envelope setGogglesSetting.
+                 * @member {eyepiece.rpc.v1.ISetGogglesSetting|null|undefined} setGogglesSetting
+                 * @memberof eyepiece.rpc.v1.Envelope
+                 * @instance
+                 */
+                Envelope.prototype.setGogglesSetting = null;
+
+                /**
                  * Envelope state.
                  * @member {eyepiece.rpc.v1.IState|null|undefined} state
                  * @memberof eyepiece.rpc.v1.Envelope
@@ -358,6 +368,14 @@ export const eyepiece = $root.eyepiece = (() => {
                  * @instance
                  */
                 Envelope.prototype.kmsOutputs = null;
+
+                /**
+                 * Envelope goggles.
+                 * @member {eyepiece.rpc.v1.IGoggles|null|undefined} goggles
+                 * @memberof eyepiece.rpc.v1.Envelope
+                 * @instance
+                 */
+                Envelope.prototype.goggles = null;
 
                 /**
                  * Envelope video.
@@ -486,12 +504,12 @@ export const eyepiece = $root.eyepiece = (() => {
 
                 /**
                  * Envelope message.
-                 * @member {"getState"|"setProperties"|"start"|"stop"|"restart"|"recenter"|"forceIdr"|"setPreview"|"setCommandLine"|"listKmsOutputs"|"state"|"error"|"log"|"pose"|"metrics"|"preview"|"acknowledged"|"kmsOutputs"|"video"|"ping"|"control"|"guiAlpha"|"pong"|"frame"|"info"|"keyRequest"|"guiAlphaAck"|"paneAlpha"|"paneAlphaAck"|"configure"|"configureAck"|undefined} message
+                 * @member {"getState"|"setProperties"|"start"|"stop"|"restart"|"recenter"|"forceIdr"|"setPreview"|"setCommandLine"|"listKmsOutputs"|"setGogglesSetting"|"state"|"error"|"log"|"pose"|"metrics"|"preview"|"acknowledged"|"kmsOutputs"|"goggles"|"video"|"ping"|"control"|"guiAlpha"|"pong"|"frame"|"info"|"keyRequest"|"guiAlphaAck"|"paneAlpha"|"paneAlphaAck"|"configure"|"configureAck"|undefined} message
                  * @memberof eyepiece.rpc.v1.Envelope
                  * @instance
                  */
                 Object.defineProperty(Envelope.prototype, "message", {
-                    get: $util.oneOfGetter($oneOfFields = ["getState", "setProperties", "start", "stop", "restart", "recenter", "forceIdr", "setPreview", "setCommandLine", "listKmsOutputs", "state", "error", "log", "pose", "metrics", "preview", "acknowledged", "kmsOutputs", "video", "ping", "control", "guiAlpha", "pong", "frame", "info", "keyRequest", "guiAlphaAck", "paneAlpha", "paneAlphaAck", "configure", "configureAck"]),
+                    get: $util.oneOfGetter($oneOfFields = ["getState", "setProperties", "start", "stop", "restart", "recenter", "forceIdr", "setPreview", "setCommandLine", "listKmsOutputs", "setGogglesSetting", "state", "error", "log", "pose", "metrics", "preview", "acknowledged", "kmsOutputs", "goggles", "video", "ping", "control", "guiAlpha", "pong", "frame", "info", "keyRequest", "guiAlphaAck", "paneAlpha", "paneAlphaAck", "configure", "configureAck"]),
                     set: $util.oneOfSetter($oneOfFields)
                 });
 
@@ -549,6 +567,8 @@ export const eyepiece = $root.eyepiece = (() => {
                         $root.eyepiece.rpc.v1.SetCommandLine.encode(message.setCommandLine, writer.uint32(/* id 18, wireType 2 =*/146).fork(), q + 1).ldelim();
                     if (message.listKmsOutputs != null && Object.hasOwnProperty.call(message, "listKmsOutputs"))
                         $root.eyepiece.rpc.v1.ListKmsOutputs.encode(message.listKmsOutputs, writer.uint32(/* id 19, wireType 2 =*/154).fork(), q + 1).ldelim();
+                    if (message.setGogglesSetting != null && Object.hasOwnProperty.call(message, "setGogglesSetting"))
+                        $root.eyepiece.rpc.v1.SetGogglesSetting.encode(message.setGogglesSetting, writer.uint32(/* id 20, wireType 2 =*/162).fork(), q + 1).ldelim();
                     if (message.state != null && Object.hasOwnProperty.call(message, "state"))
                         $root.eyepiece.rpc.v1.State.encode(message.state, writer.uint32(/* id 30, wireType 2 =*/242).fork(), q + 1).ldelim();
                     if (message.error != null && Object.hasOwnProperty.call(message, "error"))
@@ -565,6 +585,8 @@ export const eyepiece = $root.eyepiece = (() => {
                         writer.uint32(/* id 36, wireType 0 =*/288).bool(message.acknowledged);
                     if (message.kmsOutputs != null && Object.hasOwnProperty.call(message, "kmsOutputs"))
                         $root.eyepiece.rpc.v1.KmsOutputs.encode(message.kmsOutputs, writer.uint32(/* id 37, wireType 2 =*/298).fork(), q + 1).ldelim();
+                    if (message.goggles != null && Object.hasOwnProperty.call(message, "goggles"))
+                        $root.eyepiece.rpc.v1.Goggles.encode(message.goggles, writer.uint32(/* id 38, wireType 2 =*/306).fork(), q + 1).ldelim();
                     if (message.video != null && Object.hasOwnProperty.call(message, "video"))
                         $root.eyepiece.rpc.v1.Video.encode(message.video, writer.uint32(/* id 50, wireType 2 =*/402).fork(), q + 1).ldelim();
                     if (message.ping != null && Object.hasOwnProperty.call(message, "ping"))
@@ -693,6 +715,10 @@ export const eyepiece = $root.eyepiece = (() => {
                                 message.listKmsOutputs = $root.eyepiece.rpc.v1.ListKmsOutputs.decode(reader, reader.uint32(), undefined, long + 1);
                                 break;
                             }
+                        case 20: {
+                                message.setGogglesSetting = $root.eyepiece.rpc.v1.SetGogglesSetting.decode(reader, reader.uint32(), undefined, long + 1);
+                                break;
+                            }
                         case 30: {
                                 message.state = $root.eyepiece.rpc.v1.State.decode(reader, reader.uint32(), undefined, long + 1);
                                 break;
@@ -723,6 +749,10 @@ export const eyepiece = $root.eyepiece = (() => {
                             }
                         case 37: {
                                 message.kmsOutputs = $root.eyepiece.rpc.v1.KmsOutputs.decode(reader, reader.uint32(), undefined, long + 1);
+                                break;
+                            }
+                        case 38: {
+                                message.goggles = $root.eyepiece.rpc.v1.Goggles.decode(reader, reader.uint32(), undefined, long + 1);
                                 break;
                             }
                         case 50: {
@@ -935,6 +965,16 @@ export const eyepiece = $root.eyepiece = (() => {
                                 return "listKmsOutputs." + error;
                         }
                     }
+                    if (message.setGogglesSetting != null && Object.hasOwnProperty.call(message, "setGogglesSetting")) {
+                        if (properties.message === 1)
+                            return "message: multiple values";
+                        properties.message = 1;
+                        {
+                            let error = $root.eyepiece.rpc.v1.SetGogglesSetting.verify(message.setGogglesSetting, long + 1);
+                            if (error)
+                                return "setGogglesSetting." + error;
+                        }
+                    }
                     if (message.state != null && Object.hasOwnProperty.call(message, "state")) {
                         if (properties.message === 1)
                             return "message: multiple values";
@@ -1010,6 +1050,16 @@ export const eyepiece = $root.eyepiece = (() => {
                             let error = $root.eyepiece.rpc.v1.KmsOutputs.verify(message.kmsOutputs, long + 1);
                             if (error)
                                 return "kmsOutputs." + error;
+                        }
+                    }
+                    if (message.goggles != null && Object.hasOwnProperty.call(message, "goggles")) {
+                        if (properties.message === 1)
+                            return "message: multiple values";
+                        properties.message = 1;
+                        {
+                            let error = $root.eyepiece.rpc.v1.Goggles.verify(message.goggles, long + 1);
+                            if (error)
+                                return "goggles." + error;
                         }
                     }
                     if (message.video != null && Object.hasOwnProperty.call(message, "video")) {
@@ -1219,6 +1269,11 @@ export const eyepiece = $root.eyepiece = (() => {
                             throw TypeError(".eyepiece.rpc.v1.Envelope.listKmsOutputs: object expected");
                         message.listKmsOutputs = $root.eyepiece.rpc.v1.ListKmsOutputs.fromObject(object.listKmsOutputs, long + 1);
                     }
+                    if (object.setGogglesSetting != null) {
+                        if (!$util.isObject(object.setGogglesSetting))
+                            throw TypeError(".eyepiece.rpc.v1.Envelope.setGogglesSetting: object expected");
+                        message.setGogglesSetting = $root.eyepiece.rpc.v1.SetGogglesSetting.fromObject(object.setGogglesSetting, long + 1);
+                    }
                     if (object.state != null) {
                         if (!$util.isObject(object.state))
                             throw TypeError(".eyepiece.rpc.v1.Envelope.state: object expected");
@@ -1255,6 +1310,11 @@ export const eyepiece = $root.eyepiece = (() => {
                         if (!$util.isObject(object.kmsOutputs))
                             throw TypeError(".eyepiece.rpc.v1.Envelope.kmsOutputs: object expected");
                         message.kmsOutputs = $root.eyepiece.rpc.v1.KmsOutputs.fromObject(object.kmsOutputs, long + 1);
+                    }
+                    if (object.goggles != null) {
+                        if (!$util.isObject(object.goggles))
+                            throw TypeError(".eyepiece.rpc.v1.Envelope.goggles: object expected");
+                        message.goggles = $root.eyepiece.rpc.v1.Goggles.fromObject(object.goggles, long + 1);
                     }
                     if (object.video != null) {
                         if (!$util.isObject(object.video))
@@ -1406,6 +1466,11 @@ export const eyepiece = $root.eyepiece = (() => {
                         if (options.oneofs)
                             object.message = "listKmsOutputs";
                     }
+                    if (message.setGogglesSetting != null && Object.hasOwnProperty.call(message, "setGogglesSetting")) {
+                        object.setGogglesSetting = $root.eyepiece.rpc.v1.SetGogglesSetting.toObject(message.setGogglesSetting, options, q + 1);
+                        if (options.oneofs)
+                            object.message = "setGogglesSetting";
+                    }
                     if (message.state != null && Object.hasOwnProperty.call(message, "state")) {
                         object.state = $root.eyepiece.rpc.v1.State.toObject(message.state, options, q + 1);
                         if (options.oneofs)
@@ -1445,6 +1510,11 @@ export const eyepiece = $root.eyepiece = (() => {
                         object.kmsOutputs = $root.eyepiece.rpc.v1.KmsOutputs.toObject(message.kmsOutputs, options, q + 1);
                         if (options.oneofs)
                             object.message = "kmsOutputs";
+                    }
+                    if (message.goggles != null && Object.hasOwnProperty.call(message, "goggles")) {
+                        object.goggles = $root.eyepiece.rpc.v1.Goggles.toObject(message.goggles, options, q + 1);
+                        if (options.oneofs)
+                            object.message = "goggles";
                     }
                     if (message.video != null && Object.hasOwnProperty.call(message, "video")) {
                         object.video = $root.eyepiece.rpc.v1.Video.toObject(message.video, options, q + 1);
@@ -11101,6 +11171,1787 @@ export const eyepiece = $root.eyepiece = (() => {
                 };
 
                 return Acknowledgement;
+            })();
+
+            v1.SetGogglesSetting = (function() {
+
+                /**
+                 * Properties of a SetGogglesSetting.
+                 * @memberof eyepiece.rpc.v1
+                 * @interface ISetGogglesSetting
+                 * @property {string|null} [mod] SetGogglesSetting mod
+                 * @property {string|null} [key] SetGogglesSetting key
+                 * @property {string|null} [value] SetGogglesSetting value
+                 */
+
+                /**
+                 * Constructs a new SetGogglesSetting.
+                 * @memberof eyepiece.rpc.v1
+                 * @classdesc Represents a SetGogglesSetting.
+                 * @implements ISetGogglesSetting
+                 * @constructor
+                 * @param {eyepiece.rpc.v1.ISetGogglesSetting=} [properties] Properties to set
+                 */
+                function SetGogglesSetting(properties) {
+                    if (properties)
+                        for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                            if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                                this[keys[i]] = properties[keys[i]];
+                }
+
+                /**
+                 * SetGogglesSetting mod.
+                 * @member {string} mod
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @instance
+                 */
+                SetGogglesSetting.prototype.mod = "";
+
+                /**
+                 * SetGogglesSetting key.
+                 * @member {string} key
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @instance
+                 */
+                SetGogglesSetting.prototype.key = "";
+
+                /**
+                 * SetGogglesSetting value.
+                 * @member {string} value
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @instance
+                 */
+                SetGogglesSetting.prototype.value = "";
+
+                /**
+                 * Creates a new SetGogglesSetting instance using the specified properties.
+                 * @function create
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {eyepiece.rpc.v1.ISetGogglesSetting=} [properties] Properties to set
+                 * @returns {eyepiece.rpc.v1.SetGogglesSetting} SetGogglesSetting instance
+                 */
+                SetGogglesSetting.create = function create(properties) {
+                    return new SetGogglesSetting(properties);
+                };
+
+                /**
+                 * Encodes the specified SetGogglesSetting message. Does not implicitly {@link eyepiece.rpc.v1.SetGogglesSetting.verify|verify} messages.
+                 * @function encode
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {eyepiece.rpc.v1.ISetGogglesSetting} message SetGogglesSetting message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                SetGogglesSetting.encode = function encode(message, writer, q) {
+                    if (!writer)
+                        writer = $Writer.create();
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    if (message.mod != null && Object.hasOwnProperty.call(message, "mod"))
+                        writer.uint32(/* id 1, wireType 2 =*/10).string(message.mod);
+                    if (message.key != null && Object.hasOwnProperty.call(message, "key"))
+                        writer.uint32(/* id 2, wireType 2 =*/18).string(message.key);
+                    if (message.value != null && Object.hasOwnProperty.call(message, "value"))
+                        writer.uint32(/* id 3, wireType 2 =*/26).string(message.value);
+                    return writer;
+                };
+
+                /**
+                 * Encodes the specified SetGogglesSetting message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.SetGogglesSetting.verify|verify} messages.
+                 * @function encodeDelimited
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {eyepiece.rpc.v1.ISetGogglesSetting} message SetGogglesSetting message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                SetGogglesSetting.encodeDelimited = function encodeDelimited(message, writer) {
+                    return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
+                };
+
+                /**
+                 * Decodes a SetGogglesSetting message from the specified reader or buffer.
+                 * @function decode
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @param {number} [length] Message length if known beforehand
+                 * @returns {eyepiece.rpc.v1.SetGogglesSetting} SetGogglesSetting
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                SetGogglesSetting.decode = function decode(reader, length, error, long) {
+                    if (!(reader instanceof $Reader))
+                        reader = $Reader.create(reader);
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $Reader.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let end, message;
+                    if (length === undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = new $root.eyepiece.rpc.v1.SetGogglesSetting();
+                    while (reader.pos < end) {
+                        let tag = reader.uint32();
+                        if (tag === error)
+                            break;
+                        switch (tag >>> 3) {
+                        case 1: {
+                                message.mod = reader.string();
+                                break;
+                            }
+                        case 2: {
+                                message.key = reader.string();
+                                break;
+                            }
+                        case 3: {
+                                message.value = reader.string();
+                                break;
+                            }
+                        default:
+                            reader.skipType(tag & 7, long);
+                            break;
+                        }
+                    }
+                    if (length !== undefined) {
+                        if (reader.pos !== end)
+                            throw RangeError("index out of range");
+                        reader.len = length;
+                    }
+                    return message;
+                };
+
+                /**
+                 * Decodes a SetGogglesSetting message from the specified reader or buffer, length delimited.
+                 * @function decodeDelimited
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @returns {eyepiece.rpc.v1.SetGogglesSetting} SetGogglesSetting
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                SetGogglesSetting.decodeDelimited = function decodeDelimited(reader) {
+                    if (!(reader instanceof $Reader))
+                        reader = new $Reader(reader);
+                    return this.decode(reader, reader.uint32());
+                };
+
+                /**
+                 * Verifies a SetGogglesSetting message.
+                 * @function verify
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {Object.<string,*>} message Plain object to verify
+                 * @returns {string|null} `null` if valid, otherwise the reason why it is not
+                 */
+                SetGogglesSetting.verify = function verify(message, long) {
+                    if (typeof message !== "object" || message === null)
+                        return "object expected";
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        return "maximum nesting depth exceeded";
+                    if (message.mod != null && Object.hasOwnProperty.call(message, "mod"))
+                        if (!$util.isString(message.mod))
+                            return "mod: string expected";
+                    if (message.key != null && Object.hasOwnProperty.call(message, "key"))
+                        if (!$util.isString(message.key))
+                            return "key: string expected";
+                    if (message.value != null && Object.hasOwnProperty.call(message, "value"))
+                        if (!$util.isString(message.value))
+                            return "value: string expected";
+                    return null;
+                };
+
+                /**
+                 * Creates a SetGogglesSetting message from a plain object. Also converts values to their respective internal types.
+                 * @function fromObject
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {Object.<string,*>} object Plain object
+                 * @returns {eyepiece.rpc.v1.SetGogglesSetting} SetGogglesSetting
+                 */
+                SetGogglesSetting.fromObject = function fromObject(object, long) {
+                    if (object instanceof $root.eyepiece.rpc.v1.SetGogglesSetting)
+                        return object;
+                    if (!$util.isObject(object))
+                        throw TypeError(".eyepiece.rpc.v1.SetGogglesSetting: object expected");
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let message = new $root.eyepiece.rpc.v1.SetGogglesSetting();
+                    if (object.mod != null)
+                        message.mod = String(object.mod);
+                    if (object.key != null)
+                        message.key = String(object.key);
+                    if (object.value != null)
+                        message.value = String(object.value);
+                    return message;
+                };
+
+                /**
+                 * Creates a plain object from a SetGogglesSetting message. Also converts values to other types if specified.
+                 * @function toObject
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {eyepiece.rpc.v1.SetGogglesSetting} message SetGogglesSetting
+                 * @param {$protobuf.IConversionOptions} [options] Conversion options
+                 * @returns {Object.<string,*>} Plain object
+                 */
+                SetGogglesSetting.toObject = function toObject(message, options, q) {
+                    if (!options)
+                        options = {};
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    let object = {};
+                    if (options.defaults) {
+                        object.mod = "";
+                        object.key = "";
+                        object.value = "";
+                    }
+                    if (message.mod != null && Object.hasOwnProperty.call(message, "mod"))
+                        object.mod = message.mod;
+                    if (message.key != null && Object.hasOwnProperty.call(message, "key"))
+                        object.key = message.key;
+                    if (message.value != null && Object.hasOwnProperty.call(message, "value"))
+                        object.value = message.value;
+                    return object;
+                };
+
+                /**
+                 * Converts this SetGogglesSetting to JSON.
+                 * @function toJSON
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @instance
+                 * @returns {Object.<string,*>} JSON object
+                 */
+                SetGogglesSetting.prototype.toJSON = function toJSON() {
+                    return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+                };
+
+                /**
+                 * Gets the default type url for SetGogglesSetting
+                 * @function getTypeUrl
+                 * @memberof eyepiece.rpc.v1.SetGogglesSetting
+                 * @static
+                 * @param {string} [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns {string} The default type url
+                 */
+                SetGogglesSetting.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+                    if (typeUrlPrefix === undefined) {
+                        typeUrlPrefix = "type.googleapis.com";
+                    }
+                    return typeUrlPrefix + "/eyepiece.rpc.v1.SetGogglesSetting";
+                };
+
+                return SetGogglesSetting;
+            })();
+
+            v1.Goggles = (function() {
+
+                /**
+                 * Properties of a Goggles.
+                 * @memberof eyepiece.rpc.v1
+                 * @interface IGoggles
+                 * @property {boolean|null} [connected] Goggles connected
+                 * @property {string|null} [message] Goggles message
+                 * @property {string|null} [version] Goggles version
+                 * @property {string|null} [session] Goggles session
+                 * @property {boolean|null} [healthy] Goggles healthy
+                 * @property {Array.<eyepiece.rpc.v1.IGogglesApp>|null} [apps] Goggles apps
+                 * @property {Array.<eyepiece.rpc.v1.IGogglesMod>|null} [mods] Goggles mods
+                 */
+
+                /**
+                 * Constructs a new Goggles.
+                 * @memberof eyepiece.rpc.v1
+                 * @classdesc Represents a Goggles.
+                 * @implements IGoggles
+                 * @constructor
+                 * @param {eyepiece.rpc.v1.IGoggles=} [properties] Properties to set
+                 */
+                function Goggles(properties) {
+                    this.apps = [];
+                    this.mods = [];
+                    if (properties)
+                        for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                            if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                                this[keys[i]] = properties[keys[i]];
+                }
+
+                /**
+                 * Goggles connected.
+                 * @member {boolean} connected
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @instance
+                 */
+                Goggles.prototype.connected = false;
+
+                /**
+                 * Goggles message.
+                 * @member {string} message
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @instance
+                 */
+                Goggles.prototype.message = "";
+
+                /**
+                 * Goggles version.
+                 * @member {string} version
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @instance
+                 */
+                Goggles.prototype.version = "";
+
+                /**
+                 * Goggles session.
+                 * @member {string} session
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @instance
+                 */
+                Goggles.prototype.session = "";
+
+                /**
+                 * Goggles healthy.
+                 * @member {boolean} healthy
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @instance
+                 */
+                Goggles.prototype.healthy = false;
+
+                /**
+                 * Goggles apps.
+                 * @member {Array.<eyepiece.rpc.v1.IGogglesApp>} apps
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @instance
+                 */
+                Goggles.prototype.apps = $util.emptyArray;
+
+                /**
+                 * Goggles mods.
+                 * @member {Array.<eyepiece.rpc.v1.IGogglesMod>} mods
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @instance
+                 */
+                Goggles.prototype.mods = $util.emptyArray;
+
+                /**
+                 * Creates a new Goggles instance using the specified properties.
+                 * @function create
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGoggles=} [properties] Properties to set
+                 * @returns {eyepiece.rpc.v1.Goggles} Goggles instance
+                 */
+                Goggles.create = function create(properties) {
+                    return new Goggles(properties);
+                };
+
+                /**
+                 * Encodes the specified Goggles message. Does not implicitly {@link eyepiece.rpc.v1.Goggles.verify|verify} messages.
+                 * @function encode
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGoggles} message Goggles message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                Goggles.encode = function encode(message, writer, q) {
+                    if (!writer)
+                        writer = $Writer.create();
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    if (message.connected != null && Object.hasOwnProperty.call(message, "connected"))
+                        writer.uint32(/* id 1, wireType 0 =*/8).bool(message.connected);
+                    if (message.message != null && Object.hasOwnProperty.call(message, "message"))
+                        writer.uint32(/* id 2, wireType 2 =*/18).string(message.message);
+                    if (message.version != null && Object.hasOwnProperty.call(message, "version"))
+                        writer.uint32(/* id 3, wireType 2 =*/26).string(message.version);
+                    if (message.session != null && Object.hasOwnProperty.call(message, "session"))
+                        writer.uint32(/* id 4, wireType 2 =*/34).string(message.session);
+                    if (message.healthy != null && Object.hasOwnProperty.call(message, "healthy"))
+                        writer.uint32(/* id 5, wireType 0 =*/40).bool(message.healthy);
+                    if (message.apps != null && message.apps.length)
+                        for (let i = 0; i < message.apps.length; ++i)
+                            $root.eyepiece.rpc.v1.GogglesApp.encode(message.apps[i], writer.uint32(/* id 6, wireType 2 =*/50).fork(), q + 1).ldelim();
+                    if (message.mods != null && message.mods.length)
+                        for (let i = 0; i < message.mods.length; ++i)
+                            $root.eyepiece.rpc.v1.GogglesMod.encode(message.mods[i], writer.uint32(/* id 7, wireType 2 =*/58).fork(), q + 1).ldelim();
+                    return writer;
+                };
+
+                /**
+                 * Encodes the specified Goggles message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.Goggles.verify|verify} messages.
+                 * @function encodeDelimited
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGoggles} message Goggles message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                Goggles.encodeDelimited = function encodeDelimited(message, writer) {
+                    return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
+                };
+
+                /**
+                 * Decodes a Goggles message from the specified reader or buffer.
+                 * @function decode
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @param {number} [length] Message length if known beforehand
+                 * @returns {eyepiece.rpc.v1.Goggles} Goggles
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                Goggles.decode = function decode(reader, length, error, long) {
+                    if (!(reader instanceof $Reader))
+                        reader = $Reader.create(reader);
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $Reader.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let end, message;
+                    if (length === undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = new $root.eyepiece.rpc.v1.Goggles();
+                    while (reader.pos < end) {
+                        let tag = reader.uint32();
+                        if (tag === error)
+                            break;
+                        switch (tag >>> 3) {
+                        case 1: {
+                                message.connected = reader.bool();
+                                break;
+                            }
+                        case 2: {
+                                message.message = reader.string();
+                                break;
+                            }
+                        case 3: {
+                                message.version = reader.string();
+                                break;
+                            }
+                        case 4: {
+                                message.session = reader.string();
+                                break;
+                            }
+                        case 5: {
+                                message.healthy = reader.bool();
+                                break;
+                            }
+                        case 6: {
+                                if (!(message.apps && message.apps.length))
+                                    message.apps = [];
+                                message.apps.push($root.eyepiece.rpc.v1.GogglesApp.decode(reader, reader.uint32(), undefined, long + 1));
+                                break;
+                            }
+                        case 7: {
+                                if (!(message.mods && message.mods.length))
+                                    message.mods = [];
+                                message.mods.push($root.eyepiece.rpc.v1.GogglesMod.decode(reader, reader.uint32(), undefined, long + 1));
+                                break;
+                            }
+                        default:
+                            reader.skipType(tag & 7, long);
+                            break;
+                        }
+                    }
+                    if (length !== undefined) {
+                        if (reader.pos !== end)
+                            throw RangeError("index out of range");
+                        reader.len = length;
+                    }
+                    return message;
+                };
+
+                /**
+                 * Decodes a Goggles message from the specified reader or buffer, length delimited.
+                 * @function decodeDelimited
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @returns {eyepiece.rpc.v1.Goggles} Goggles
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                Goggles.decodeDelimited = function decodeDelimited(reader) {
+                    if (!(reader instanceof $Reader))
+                        reader = new $Reader(reader);
+                    return this.decode(reader, reader.uint32());
+                };
+
+                /**
+                 * Verifies a Goggles message.
+                 * @function verify
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {Object.<string,*>} message Plain object to verify
+                 * @returns {string|null} `null` if valid, otherwise the reason why it is not
+                 */
+                Goggles.verify = function verify(message, long) {
+                    if (typeof message !== "object" || message === null)
+                        return "object expected";
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        return "maximum nesting depth exceeded";
+                    if (message.connected != null && Object.hasOwnProperty.call(message, "connected"))
+                        if (typeof message.connected !== "boolean")
+                            return "connected: boolean expected";
+                    if (message.message != null && Object.hasOwnProperty.call(message, "message"))
+                        if (!$util.isString(message.message))
+                            return "message: string expected";
+                    if (message.version != null && Object.hasOwnProperty.call(message, "version"))
+                        if (!$util.isString(message.version))
+                            return "version: string expected";
+                    if (message.session != null && Object.hasOwnProperty.call(message, "session"))
+                        if (!$util.isString(message.session))
+                            return "session: string expected";
+                    if (message.healthy != null && Object.hasOwnProperty.call(message, "healthy"))
+                        if (typeof message.healthy !== "boolean")
+                            return "healthy: boolean expected";
+                    if (message.apps != null && Object.hasOwnProperty.call(message, "apps")) {
+                        if (!Array.isArray(message.apps))
+                            return "apps: array expected";
+                        for (let i = 0; i < message.apps.length; ++i) {
+                            let error = $root.eyepiece.rpc.v1.GogglesApp.verify(message.apps[i], long + 1);
+                            if (error)
+                                return "apps." + error;
+                        }
+                    }
+                    if (message.mods != null && Object.hasOwnProperty.call(message, "mods")) {
+                        if (!Array.isArray(message.mods))
+                            return "mods: array expected";
+                        for (let i = 0; i < message.mods.length; ++i) {
+                            let error = $root.eyepiece.rpc.v1.GogglesMod.verify(message.mods[i], long + 1);
+                            if (error)
+                                return "mods." + error;
+                        }
+                    }
+                    return null;
+                };
+
+                /**
+                 * Creates a Goggles message from a plain object. Also converts values to their respective internal types.
+                 * @function fromObject
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {Object.<string,*>} object Plain object
+                 * @returns {eyepiece.rpc.v1.Goggles} Goggles
+                 */
+                Goggles.fromObject = function fromObject(object, long) {
+                    if (object instanceof $root.eyepiece.rpc.v1.Goggles)
+                        return object;
+                    if (!$util.isObject(object))
+                        throw TypeError(".eyepiece.rpc.v1.Goggles: object expected");
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let message = new $root.eyepiece.rpc.v1.Goggles();
+                    if (object.connected != null)
+                        message.connected = Boolean(object.connected);
+                    if (object.message != null)
+                        message.message = String(object.message);
+                    if (object.version != null)
+                        message.version = String(object.version);
+                    if (object.session != null)
+                        message.session = String(object.session);
+                    if (object.healthy != null)
+                        message.healthy = Boolean(object.healthy);
+                    if (object.apps) {
+                        if (!Array.isArray(object.apps))
+                            throw TypeError(".eyepiece.rpc.v1.Goggles.apps: array expected");
+                        message.apps = [];
+                        for (let i = 0; i < object.apps.length; ++i) {
+                            if (!$util.isObject(object.apps[i]))
+                                throw TypeError(".eyepiece.rpc.v1.Goggles.apps: object expected");
+                            message.apps[i] = $root.eyepiece.rpc.v1.GogglesApp.fromObject(object.apps[i], long + 1);
+                        }
+                    }
+                    if (object.mods) {
+                        if (!Array.isArray(object.mods))
+                            throw TypeError(".eyepiece.rpc.v1.Goggles.mods: array expected");
+                        message.mods = [];
+                        for (let i = 0; i < object.mods.length; ++i) {
+                            if (!$util.isObject(object.mods[i]))
+                                throw TypeError(".eyepiece.rpc.v1.Goggles.mods: object expected");
+                            message.mods[i] = $root.eyepiece.rpc.v1.GogglesMod.fromObject(object.mods[i], long + 1);
+                        }
+                    }
+                    return message;
+                };
+
+                /**
+                 * Creates a plain object from a Goggles message. Also converts values to other types if specified.
+                 * @function toObject
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {eyepiece.rpc.v1.Goggles} message Goggles
+                 * @param {$protobuf.IConversionOptions} [options] Conversion options
+                 * @returns {Object.<string,*>} Plain object
+                 */
+                Goggles.toObject = function toObject(message, options, q) {
+                    if (!options)
+                        options = {};
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    let object = {};
+                    if (options.arrays || options.defaults) {
+                        object.apps = [];
+                        object.mods = [];
+                    }
+                    if (options.defaults) {
+                        object.connected = false;
+                        object.message = "";
+                        object.version = "";
+                        object.session = "";
+                        object.healthy = false;
+                    }
+                    if (message.connected != null && Object.hasOwnProperty.call(message, "connected"))
+                        object.connected = message.connected;
+                    if (message.message != null && Object.hasOwnProperty.call(message, "message"))
+                        object.message = message.message;
+                    if (message.version != null && Object.hasOwnProperty.call(message, "version"))
+                        object.version = message.version;
+                    if (message.session != null && Object.hasOwnProperty.call(message, "session"))
+                        object.session = message.session;
+                    if (message.healthy != null && Object.hasOwnProperty.call(message, "healthy"))
+                        object.healthy = message.healthy;
+                    if (message.apps && message.apps.length) {
+                        object.apps = [];
+                        for (let j = 0; j < message.apps.length; ++j)
+                            object.apps[j] = $root.eyepiece.rpc.v1.GogglesApp.toObject(message.apps[j], options, q + 1);
+                    }
+                    if (message.mods && message.mods.length) {
+                        object.mods = [];
+                        for (let j = 0; j < message.mods.length; ++j)
+                            object.mods[j] = $root.eyepiece.rpc.v1.GogglesMod.toObject(message.mods[j], options, q + 1);
+                    }
+                    return object;
+                };
+
+                /**
+                 * Converts this Goggles to JSON.
+                 * @function toJSON
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @instance
+                 * @returns {Object.<string,*>} JSON object
+                 */
+                Goggles.prototype.toJSON = function toJSON() {
+                    return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+                };
+
+                /**
+                 * Gets the default type url for Goggles
+                 * @function getTypeUrl
+                 * @memberof eyepiece.rpc.v1.Goggles
+                 * @static
+                 * @param {string} [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns {string} The default type url
+                 */
+                Goggles.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+                    if (typeUrlPrefix === undefined) {
+                        typeUrlPrefix = "type.googleapis.com";
+                    }
+                    return typeUrlPrefix + "/eyepiece.rpc.v1.Goggles";
+                };
+
+                return Goggles;
+            })();
+
+            v1.GogglesApp = (function() {
+
+                /**
+                 * Properties of a GogglesApp.
+                 * @memberof eyepiece.rpc.v1
+                 * @interface IGogglesApp
+                 * @property {string|null} [entry] GogglesApp entry
+                 * @property {string|null} [label] GogglesApp label
+                 * @property {boolean|null} [running] GogglesApp running
+                 */
+
+                /**
+                 * Constructs a new GogglesApp.
+                 * @memberof eyepiece.rpc.v1
+                 * @classdesc Represents a GogglesApp.
+                 * @implements IGogglesApp
+                 * @constructor
+                 * @param {eyepiece.rpc.v1.IGogglesApp=} [properties] Properties to set
+                 */
+                function GogglesApp(properties) {
+                    if (properties)
+                        for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                            if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                                this[keys[i]] = properties[keys[i]];
+                }
+
+                /**
+                 * GogglesApp entry.
+                 * @member {string} entry
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @instance
+                 */
+                GogglesApp.prototype.entry = "";
+
+                /**
+                 * GogglesApp label.
+                 * @member {string} label
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @instance
+                 */
+                GogglesApp.prototype.label = "";
+
+                /**
+                 * GogglesApp running.
+                 * @member {boolean} running
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @instance
+                 */
+                GogglesApp.prototype.running = false;
+
+                /**
+                 * Creates a new GogglesApp instance using the specified properties.
+                 * @function create
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesApp=} [properties] Properties to set
+                 * @returns {eyepiece.rpc.v1.GogglesApp} GogglesApp instance
+                 */
+                GogglesApp.create = function create(properties) {
+                    return new GogglesApp(properties);
+                };
+
+                /**
+                 * Encodes the specified GogglesApp message. Does not implicitly {@link eyepiece.rpc.v1.GogglesApp.verify|verify} messages.
+                 * @function encode
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesApp} message GogglesApp message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                GogglesApp.encode = function encode(message, writer, q) {
+                    if (!writer)
+                        writer = $Writer.create();
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    if (message.entry != null && Object.hasOwnProperty.call(message, "entry"))
+                        writer.uint32(/* id 1, wireType 2 =*/10).string(message.entry);
+                    if (message.label != null && Object.hasOwnProperty.call(message, "label"))
+                        writer.uint32(/* id 2, wireType 2 =*/18).string(message.label);
+                    if (message.running != null && Object.hasOwnProperty.call(message, "running"))
+                        writer.uint32(/* id 3, wireType 0 =*/24).bool(message.running);
+                    return writer;
+                };
+
+                /**
+                 * Encodes the specified GogglesApp message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.GogglesApp.verify|verify} messages.
+                 * @function encodeDelimited
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesApp} message GogglesApp message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                GogglesApp.encodeDelimited = function encodeDelimited(message, writer) {
+                    return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
+                };
+
+                /**
+                 * Decodes a GogglesApp message from the specified reader or buffer.
+                 * @function decode
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @param {number} [length] Message length if known beforehand
+                 * @returns {eyepiece.rpc.v1.GogglesApp} GogglesApp
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                GogglesApp.decode = function decode(reader, length, error, long) {
+                    if (!(reader instanceof $Reader))
+                        reader = $Reader.create(reader);
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $Reader.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let end, message;
+                    if (length === undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = new $root.eyepiece.rpc.v1.GogglesApp();
+                    while (reader.pos < end) {
+                        let tag = reader.uint32();
+                        if (tag === error)
+                            break;
+                        switch (tag >>> 3) {
+                        case 1: {
+                                message.entry = reader.string();
+                                break;
+                            }
+                        case 2: {
+                                message.label = reader.string();
+                                break;
+                            }
+                        case 3: {
+                                message.running = reader.bool();
+                                break;
+                            }
+                        default:
+                            reader.skipType(tag & 7, long);
+                            break;
+                        }
+                    }
+                    if (length !== undefined) {
+                        if (reader.pos !== end)
+                            throw RangeError("index out of range");
+                        reader.len = length;
+                    }
+                    return message;
+                };
+
+                /**
+                 * Decodes a GogglesApp message from the specified reader or buffer, length delimited.
+                 * @function decodeDelimited
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @returns {eyepiece.rpc.v1.GogglesApp} GogglesApp
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                GogglesApp.decodeDelimited = function decodeDelimited(reader) {
+                    if (!(reader instanceof $Reader))
+                        reader = new $Reader(reader);
+                    return this.decode(reader, reader.uint32());
+                };
+
+                /**
+                 * Verifies a GogglesApp message.
+                 * @function verify
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {Object.<string,*>} message Plain object to verify
+                 * @returns {string|null} `null` if valid, otherwise the reason why it is not
+                 */
+                GogglesApp.verify = function verify(message, long) {
+                    if (typeof message !== "object" || message === null)
+                        return "object expected";
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        return "maximum nesting depth exceeded";
+                    if (message.entry != null && Object.hasOwnProperty.call(message, "entry"))
+                        if (!$util.isString(message.entry))
+                            return "entry: string expected";
+                    if (message.label != null && Object.hasOwnProperty.call(message, "label"))
+                        if (!$util.isString(message.label))
+                            return "label: string expected";
+                    if (message.running != null && Object.hasOwnProperty.call(message, "running"))
+                        if (typeof message.running !== "boolean")
+                            return "running: boolean expected";
+                    return null;
+                };
+
+                /**
+                 * Creates a GogglesApp message from a plain object. Also converts values to their respective internal types.
+                 * @function fromObject
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {Object.<string,*>} object Plain object
+                 * @returns {eyepiece.rpc.v1.GogglesApp} GogglesApp
+                 */
+                GogglesApp.fromObject = function fromObject(object, long) {
+                    if (object instanceof $root.eyepiece.rpc.v1.GogglesApp)
+                        return object;
+                    if (!$util.isObject(object))
+                        throw TypeError(".eyepiece.rpc.v1.GogglesApp: object expected");
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let message = new $root.eyepiece.rpc.v1.GogglesApp();
+                    if (object.entry != null)
+                        message.entry = String(object.entry);
+                    if (object.label != null)
+                        message.label = String(object.label);
+                    if (object.running != null)
+                        message.running = Boolean(object.running);
+                    return message;
+                };
+
+                /**
+                 * Creates a plain object from a GogglesApp message. Also converts values to other types if specified.
+                 * @function toObject
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {eyepiece.rpc.v1.GogglesApp} message GogglesApp
+                 * @param {$protobuf.IConversionOptions} [options] Conversion options
+                 * @returns {Object.<string,*>} Plain object
+                 */
+                GogglesApp.toObject = function toObject(message, options, q) {
+                    if (!options)
+                        options = {};
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    let object = {};
+                    if (options.defaults) {
+                        object.entry = "";
+                        object.label = "";
+                        object.running = false;
+                    }
+                    if (message.entry != null && Object.hasOwnProperty.call(message, "entry"))
+                        object.entry = message.entry;
+                    if (message.label != null && Object.hasOwnProperty.call(message, "label"))
+                        object.label = message.label;
+                    if (message.running != null && Object.hasOwnProperty.call(message, "running"))
+                        object.running = message.running;
+                    return object;
+                };
+
+                /**
+                 * Converts this GogglesApp to JSON.
+                 * @function toJSON
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @instance
+                 * @returns {Object.<string,*>} JSON object
+                 */
+                GogglesApp.prototype.toJSON = function toJSON() {
+                    return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+                };
+
+                /**
+                 * Gets the default type url for GogglesApp
+                 * @function getTypeUrl
+                 * @memberof eyepiece.rpc.v1.GogglesApp
+                 * @static
+                 * @param {string} [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns {string} The default type url
+                 */
+                GogglesApp.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+                    if (typeUrlPrefix === undefined) {
+                        typeUrlPrefix = "type.googleapis.com";
+                    }
+                    return typeUrlPrefix + "/eyepiece.rpc.v1.GogglesApp";
+                };
+
+                return GogglesApp;
+            })();
+
+            v1.GogglesMod = (function() {
+
+                /**
+                 * Properties of a GogglesMod.
+                 * @memberof eyepiece.rpc.v1
+                 * @interface IGogglesMod
+                 * @property {string|null} [mod] GogglesMod mod
+                 * @property {string|null} [name] GogglesMod name
+                 * @property {Array.<eyepiece.rpc.v1.IGogglesSetting>|null} [settings] GogglesMod settings
+                 */
+
+                /**
+                 * Constructs a new GogglesMod.
+                 * @memberof eyepiece.rpc.v1
+                 * @classdesc Represents a GogglesMod.
+                 * @implements IGogglesMod
+                 * @constructor
+                 * @param {eyepiece.rpc.v1.IGogglesMod=} [properties] Properties to set
+                 */
+                function GogglesMod(properties) {
+                    this.settings = [];
+                    if (properties)
+                        for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                            if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                                this[keys[i]] = properties[keys[i]];
+                }
+
+                /**
+                 * GogglesMod mod.
+                 * @member {string} mod
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @instance
+                 */
+                GogglesMod.prototype.mod = "";
+
+                /**
+                 * GogglesMod name.
+                 * @member {string} name
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @instance
+                 */
+                GogglesMod.prototype.name = "";
+
+                /**
+                 * GogglesMod settings.
+                 * @member {Array.<eyepiece.rpc.v1.IGogglesSetting>} settings
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @instance
+                 */
+                GogglesMod.prototype.settings = $util.emptyArray;
+
+                /**
+                 * Creates a new GogglesMod instance using the specified properties.
+                 * @function create
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesMod=} [properties] Properties to set
+                 * @returns {eyepiece.rpc.v1.GogglesMod} GogglesMod instance
+                 */
+                GogglesMod.create = function create(properties) {
+                    return new GogglesMod(properties);
+                };
+
+                /**
+                 * Encodes the specified GogglesMod message. Does not implicitly {@link eyepiece.rpc.v1.GogglesMod.verify|verify} messages.
+                 * @function encode
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesMod} message GogglesMod message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                GogglesMod.encode = function encode(message, writer, q) {
+                    if (!writer)
+                        writer = $Writer.create();
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    if (message.mod != null && Object.hasOwnProperty.call(message, "mod"))
+                        writer.uint32(/* id 1, wireType 2 =*/10).string(message.mod);
+                    if (message.name != null && Object.hasOwnProperty.call(message, "name"))
+                        writer.uint32(/* id 2, wireType 2 =*/18).string(message.name);
+                    if (message.settings != null && message.settings.length)
+                        for (let i = 0; i < message.settings.length; ++i)
+                            $root.eyepiece.rpc.v1.GogglesSetting.encode(message.settings[i], writer.uint32(/* id 3, wireType 2 =*/26).fork(), q + 1).ldelim();
+                    return writer;
+                };
+
+                /**
+                 * Encodes the specified GogglesMod message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.GogglesMod.verify|verify} messages.
+                 * @function encodeDelimited
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesMod} message GogglesMod message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                GogglesMod.encodeDelimited = function encodeDelimited(message, writer) {
+                    return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
+                };
+
+                /**
+                 * Decodes a GogglesMod message from the specified reader or buffer.
+                 * @function decode
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @param {number} [length] Message length if known beforehand
+                 * @returns {eyepiece.rpc.v1.GogglesMod} GogglesMod
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                GogglesMod.decode = function decode(reader, length, error, long) {
+                    if (!(reader instanceof $Reader))
+                        reader = $Reader.create(reader);
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $Reader.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let end, message;
+                    if (length === undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = new $root.eyepiece.rpc.v1.GogglesMod();
+                    while (reader.pos < end) {
+                        let tag = reader.uint32();
+                        if (tag === error)
+                            break;
+                        switch (tag >>> 3) {
+                        case 1: {
+                                message.mod = reader.string();
+                                break;
+                            }
+                        case 2: {
+                                message.name = reader.string();
+                                break;
+                            }
+                        case 3: {
+                                if (!(message.settings && message.settings.length))
+                                    message.settings = [];
+                                message.settings.push($root.eyepiece.rpc.v1.GogglesSetting.decode(reader, reader.uint32(), undefined, long + 1));
+                                break;
+                            }
+                        default:
+                            reader.skipType(tag & 7, long);
+                            break;
+                        }
+                    }
+                    if (length !== undefined) {
+                        if (reader.pos !== end)
+                            throw RangeError("index out of range");
+                        reader.len = length;
+                    }
+                    return message;
+                };
+
+                /**
+                 * Decodes a GogglesMod message from the specified reader or buffer, length delimited.
+                 * @function decodeDelimited
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @returns {eyepiece.rpc.v1.GogglesMod} GogglesMod
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                GogglesMod.decodeDelimited = function decodeDelimited(reader) {
+                    if (!(reader instanceof $Reader))
+                        reader = new $Reader(reader);
+                    return this.decode(reader, reader.uint32());
+                };
+
+                /**
+                 * Verifies a GogglesMod message.
+                 * @function verify
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {Object.<string,*>} message Plain object to verify
+                 * @returns {string|null} `null` if valid, otherwise the reason why it is not
+                 */
+                GogglesMod.verify = function verify(message, long) {
+                    if (typeof message !== "object" || message === null)
+                        return "object expected";
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        return "maximum nesting depth exceeded";
+                    if (message.mod != null && Object.hasOwnProperty.call(message, "mod"))
+                        if (!$util.isString(message.mod))
+                            return "mod: string expected";
+                    if (message.name != null && Object.hasOwnProperty.call(message, "name"))
+                        if (!$util.isString(message.name))
+                            return "name: string expected";
+                    if (message.settings != null && Object.hasOwnProperty.call(message, "settings")) {
+                        if (!Array.isArray(message.settings))
+                            return "settings: array expected";
+                        for (let i = 0; i < message.settings.length; ++i) {
+                            let error = $root.eyepiece.rpc.v1.GogglesSetting.verify(message.settings[i], long + 1);
+                            if (error)
+                                return "settings." + error;
+                        }
+                    }
+                    return null;
+                };
+
+                /**
+                 * Creates a GogglesMod message from a plain object. Also converts values to their respective internal types.
+                 * @function fromObject
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {Object.<string,*>} object Plain object
+                 * @returns {eyepiece.rpc.v1.GogglesMod} GogglesMod
+                 */
+                GogglesMod.fromObject = function fromObject(object, long) {
+                    if (object instanceof $root.eyepiece.rpc.v1.GogglesMod)
+                        return object;
+                    if (!$util.isObject(object))
+                        throw TypeError(".eyepiece.rpc.v1.GogglesMod: object expected");
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let message = new $root.eyepiece.rpc.v1.GogglesMod();
+                    if (object.mod != null)
+                        message.mod = String(object.mod);
+                    if (object.name != null)
+                        message.name = String(object.name);
+                    if (object.settings) {
+                        if (!Array.isArray(object.settings))
+                            throw TypeError(".eyepiece.rpc.v1.GogglesMod.settings: array expected");
+                        message.settings = [];
+                        for (let i = 0; i < object.settings.length; ++i) {
+                            if (!$util.isObject(object.settings[i]))
+                                throw TypeError(".eyepiece.rpc.v1.GogglesMod.settings: object expected");
+                            message.settings[i] = $root.eyepiece.rpc.v1.GogglesSetting.fromObject(object.settings[i], long + 1);
+                        }
+                    }
+                    return message;
+                };
+
+                /**
+                 * Creates a plain object from a GogglesMod message. Also converts values to other types if specified.
+                 * @function toObject
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {eyepiece.rpc.v1.GogglesMod} message GogglesMod
+                 * @param {$protobuf.IConversionOptions} [options] Conversion options
+                 * @returns {Object.<string,*>} Plain object
+                 */
+                GogglesMod.toObject = function toObject(message, options, q) {
+                    if (!options)
+                        options = {};
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    let object = {};
+                    if (options.arrays || options.defaults)
+                        object.settings = [];
+                    if (options.defaults) {
+                        object.mod = "";
+                        object.name = "";
+                    }
+                    if (message.mod != null && Object.hasOwnProperty.call(message, "mod"))
+                        object.mod = message.mod;
+                    if (message.name != null && Object.hasOwnProperty.call(message, "name"))
+                        object.name = message.name;
+                    if (message.settings && message.settings.length) {
+                        object.settings = [];
+                        for (let j = 0; j < message.settings.length; ++j)
+                            object.settings[j] = $root.eyepiece.rpc.v1.GogglesSetting.toObject(message.settings[j], options, q + 1);
+                    }
+                    return object;
+                };
+
+                /**
+                 * Converts this GogglesMod to JSON.
+                 * @function toJSON
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @instance
+                 * @returns {Object.<string,*>} JSON object
+                 */
+                GogglesMod.prototype.toJSON = function toJSON() {
+                    return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+                };
+
+                /**
+                 * Gets the default type url for GogglesMod
+                 * @function getTypeUrl
+                 * @memberof eyepiece.rpc.v1.GogglesMod
+                 * @static
+                 * @param {string} [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns {string} The default type url
+                 */
+                GogglesMod.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+                    if (typeUrlPrefix === undefined) {
+                        typeUrlPrefix = "type.googleapis.com";
+                    }
+                    return typeUrlPrefix + "/eyepiece.rpc.v1.GogglesMod";
+                };
+
+                return GogglesMod;
+            })();
+
+            v1.GogglesSetting = (function() {
+
+                /**
+                 * Properties of a GogglesSetting.
+                 * @memberof eyepiece.rpc.v1
+                 * @interface IGogglesSetting
+                 * @property {string|null} [key] GogglesSetting key
+                 * @property {string|null} [type] GogglesSetting type
+                 * @property {string|null} [label] GogglesSetting label
+                 * @property {string|null} [value] GogglesSetting value
+                 * @property {Array.<string>|null} [options] GogglesSetting options
+                 * @property {number|null} [min] GogglesSetting min
+                 * @property {number|null} [max] GogglesSetting max
+                 * @property {number|null} [step] GogglesSetting step
+                 * @property {string|null} [unit] GogglesSetting unit
+                 * @property {boolean|null} [live] GogglesSetting live
+                 */
+
+                /**
+                 * Constructs a new GogglesSetting.
+                 * @memberof eyepiece.rpc.v1
+                 * @classdesc Represents a GogglesSetting.
+                 * @implements IGogglesSetting
+                 * @constructor
+                 * @param {eyepiece.rpc.v1.IGogglesSetting=} [properties] Properties to set
+                 */
+                function GogglesSetting(properties) {
+                    this.options = [];
+                    if (properties)
+                        for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                            if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                                this[keys[i]] = properties[keys[i]];
+                }
+
+                /**
+                 * GogglesSetting key.
+                 * @member {string} key
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.key = "";
+
+                /**
+                 * GogglesSetting type.
+                 * @member {string} type
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.type = "";
+
+                /**
+                 * GogglesSetting label.
+                 * @member {string} label
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.label = "";
+
+                /**
+                 * GogglesSetting value.
+                 * @member {string} value
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.value = "";
+
+                /**
+                 * GogglesSetting options.
+                 * @member {Array.<string>} options
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.options = $util.emptyArray;
+
+                /**
+                 * GogglesSetting min.
+                 * @member {number} min
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.min = 0;
+
+                /**
+                 * GogglesSetting max.
+                 * @member {number} max
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.max = 0;
+
+                /**
+                 * GogglesSetting step.
+                 * @member {number} step
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.step = 0;
+
+                /**
+                 * GogglesSetting unit.
+                 * @member {string} unit
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.unit = "";
+
+                /**
+                 * GogglesSetting live.
+                 * @member {boolean} live
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 */
+                GogglesSetting.prototype.live = false;
+
+                /**
+                 * Creates a new GogglesSetting instance using the specified properties.
+                 * @function create
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesSetting=} [properties] Properties to set
+                 * @returns {eyepiece.rpc.v1.GogglesSetting} GogglesSetting instance
+                 */
+                GogglesSetting.create = function create(properties) {
+                    return new GogglesSetting(properties);
+                };
+
+                /**
+                 * Encodes the specified GogglesSetting message. Does not implicitly {@link eyepiece.rpc.v1.GogglesSetting.verify|verify} messages.
+                 * @function encode
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesSetting} message GogglesSetting message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                GogglesSetting.encode = function encode(message, writer, q) {
+                    if (!writer)
+                        writer = $Writer.create();
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    if (message.key != null && Object.hasOwnProperty.call(message, "key"))
+                        writer.uint32(/* id 1, wireType 2 =*/10).string(message.key);
+                    if (message.type != null && Object.hasOwnProperty.call(message, "type"))
+                        writer.uint32(/* id 2, wireType 2 =*/18).string(message.type);
+                    if (message.label != null && Object.hasOwnProperty.call(message, "label"))
+                        writer.uint32(/* id 3, wireType 2 =*/26).string(message.label);
+                    if (message.value != null && Object.hasOwnProperty.call(message, "value"))
+                        writer.uint32(/* id 4, wireType 2 =*/34).string(message.value);
+                    if (message.options != null && message.options.length)
+                        for (let i = 0; i < message.options.length; ++i)
+                            writer.uint32(/* id 5, wireType 2 =*/42).string(message.options[i]);
+                    if (message.min != null && Object.hasOwnProperty.call(message, "min"))
+                        writer.uint32(/* id 6, wireType 0 =*/48).int32(message.min);
+                    if (message.max != null && Object.hasOwnProperty.call(message, "max"))
+                        writer.uint32(/* id 7, wireType 0 =*/56).int32(message.max);
+                    if (message.step != null && Object.hasOwnProperty.call(message, "step"))
+                        writer.uint32(/* id 8, wireType 0 =*/64).int32(message.step);
+                    if (message.unit != null && Object.hasOwnProperty.call(message, "unit"))
+                        writer.uint32(/* id 9, wireType 2 =*/74).string(message.unit);
+                    if (message.live != null && Object.hasOwnProperty.call(message, "live"))
+                        writer.uint32(/* id 10, wireType 0 =*/80).bool(message.live);
+                    return writer;
+                };
+
+                /**
+                 * Encodes the specified GogglesSetting message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.GogglesSetting.verify|verify} messages.
+                 * @function encodeDelimited
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {eyepiece.rpc.v1.IGogglesSetting} message GogglesSetting message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                GogglesSetting.encodeDelimited = function encodeDelimited(message, writer) {
+                    return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
+                };
+
+                /**
+                 * Decodes a GogglesSetting message from the specified reader or buffer.
+                 * @function decode
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @param {number} [length] Message length if known beforehand
+                 * @returns {eyepiece.rpc.v1.GogglesSetting} GogglesSetting
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                GogglesSetting.decode = function decode(reader, length, error, long) {
+                    if (!(reader instanceof $Reader))
+                        reader = $Reader.create(reader);
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $Reader.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let end, message;
+                    if (length === undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = new $root.eyepiece.rpc.v1.GogglesSetting();
+                    while (reader.pos < end) {
+                        let tag = reader.uint32();
+                        if (tag === error)
+                            break;
+                        switch (tag >>> 3) {
+                        case 1: {
+                                message.key = reader.string();
+                                break;
+                            }
+                        case 2: {
+                                message.type = reader.string();
+                                break;
+                            }
+                        case 3: {
+                                message.label = reader.string();
+                                break;
+                            }
+                        case 4: {
+                                message.value = reader.string();
+                                break;
+                            }
+                        case 5: {
+                                if (!(message.options && message.options.length))
+                                    message.options = [];
+                                message.options.push(reader.string());
+                                break;
+                            }
+                        case 6: {
+                                message.min = reader.int32();
+                                break;
+                            }
+                        case 7: {
+                                message.max = reader.int32();
+                                break;
+                            }
+                        case 8: {
+                                message.step = reader.int32();
+                                break;
+                            }
+                        case 9: {
+                                message.unit = reader.string();
+                                break;
+                            }
+                        case 10: {
+                                message.live = reader.bool();
+                                break;
+                            }
+                        default:
+                            reader.skipType(tag & 7, long);
+                            break;
+                        }
+                    }
+                    if (length !== undefined) {
+                        if (reader.pos !== end)
+                            throw RangeError("index out of range");
+                        reader.len = length;
+                    }
+                    return message;
+                };
+
+                /**
+                 * Decodes a GogglesSetting message from the specified reader or buffer, length delimited.
+                 * @function decodeDelimited
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @returns {eyepiece.rpc.v1.GogglesSetting} GogglesSetting
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                GogglesSetting.decodeDelimited = function decodeDelimited(reader) {
+                    if (!(reader instanceof $Reader))
+                        reader = new $Reader(reader);
+                    return this.decode(reader, reader.uint32());
+                };
+
+                /**
+                 * Verifies a GogglesSetting message.
+                 * @function verify
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {Object.<string,*>} message Plain object to verify
+                 * @returns {string|null} `null` if valid, otherwise the reason why it is not
+                 */
+                GogglesSetting.verify = function verify(message, long) {
+                    if (typeof message !== "object" || message === null)
+                        return "object expected";
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        return "maximum nesting depth exceeded";
+                    if (message.key != null && Object.hasOwnProperty.call(message, "key"))
+                        if (!$util.isString(message.key))
+                            return "key: string expected";
+                    if (message.type != null && Object.hasOwnProperty.call(message, "type"))
+                        if (!$util.isString(message.type))
+                            return "type: string expected";
+                    if (message.label != null && Object.hasOwnProperty.call(message, "label"))
+                        if (!$util.isString(message.label))
+                            return "label: string expected";
+                    if (message.value != null && Object.hasOwnProperty.call(message, "value"))
+                        if (!$util.isString(message.value))
+                            return "value: string expected";
+                    if (message.options != null && Object.hasOwnProperty.call(message, "options")) {
+                        if (!Array.isArray(message.options))
+                            return "options: array expected";
+                        for (let i = 0; i < message.options.length; ++i)
+                            if (!$util.isString(message.options[i]))
+                                return "options: string[] expected";
+                    }
+                    if (message.min != null && Object.hasOwnProperty.call(message, "min"))
+                        if (!$util.isInteger(message.min))
+                            return "min: integer expected";
+                    if (message.max != null && Object.hasOwnProperty.call(message, "max"))
+                        if (!$util.isInteger(message.max))
+                            return "max: integer expected";
+                    if (message.step != null && Object.hasOwnProperty.call(message, "step"))
+                        if (!$util.isInteger(message.step))
+                            return "step: integer expected";
+                    if (message.unit != null && Object.hasOwnProperty.call(message, "unit"))
+                        if (!$util.isString(message.unit))
+                            return "unit: string expected";
+                    if (message.live != null && Object.hasOwnProperty.call(message, "live"))
+                        if (typeof message.live !== "boolean")
+                            return "live: boolean expected";
+                    return null;
+                };
+
+                /**
+                 * Creates a GogglesSetting message from a plain object. Also converts values to their respective internal types.
+                 * @function fromObject
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {Object.<string,*>} object Plain object
+                 * @returns {eyepiece.rpc.v1.GogglesSetting} GogglesSetting
+                 */
+                GogglesSetting.fromObject = function fromObject(object, long) {
+                    if (object instanceof $root.eyepiece.rpc.v1.GogglesSetting)
+                        return object;
+                    if (!$util.isObject(object))
+                        throw TypeError(".eyepiece.rpc.v1.GogglesSetting: object expected");
+                    if (long === undefined)
+                        long = 0;
+                    if (long > $util.recursionLimit)
+                        throw Error("maximum nesting depth exceeded");
+                    let message = new $root.eyepiece.rpc.v1.GogglesSetting();
+                    if (object.key != null)
+                        message.key = String(object.key);
+                    if (object.type != null)
+                        message.type = String(object.type);
+                    if (object.label != null)
+                        message.label = String(object.label);
+                    if (object.value != null)
+                        message.value = String(object.value);
+                    if (object.options) {
+                        if (!Array.isArray(object.options))
+                            throw TypeError(".eyepiece.rpc.v1.GogglesSetting.options: array expected");
+                        message.options = [];
+                        for (let i = 0; i < object.options.length; ++i)
+                            message.options[i] = String(object.options[i]);
+                    }
+                    if (object.min != null)
+                        message.min = object.min | 0;
+                    if (object.max != null)
+                        message.max = object.max | 0;
+                    if (object.step != null)
+                        message.step = object.step | 0;
+                    if (object.unit != null)
+                        message.unit = String(object.unit);
+                    if (object.live != null)
+                        message.live = Boolean(object.live);
+                    return message;
+                };
+
+                /**
+                 * Creates a plain object from a GogglesSetting message. Also converts values to other types if specified.
+                 * @function toObject
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {eyepiece.rpc.v1.GogglesSetting} message GogglesSetting
+                 * @param {$protobuf.IConversionOptions} [options] Conversion options
+                 * @returns {Object.<string,*>} Plain object
+                 */
+                GogglesSetting.toObject = function toObject(message, options, q) {
+                    if (!options)
+                        options = {};
+                    if (q === undefined)
+                        q = 0;
+                    if (q > $util.recursionLimit)
+                        throw Error("max depth exceeded");
+                    let object = {};
+                    if (options.arrays || options.defaults)
+                        object.options = [];
+                    if (options.defaults) {
+                        object.key = "";
+                        object.type = "";
+                        object.label = "";
+                        object.value = "";
+                        object.min = 0;
+                        object.max = 0;
+                        object.step = 0;
+                        object.unit = "";
+                        object.live = false;
+                    }
+                    if (message.key != null && Object.hasOwnProperty.call(message, "key"))
+                        object.key = message.key;
+                    if (message.type != null && Object.hasOwnProperty.call(message, "type"))
+                        object.type = message.type;
+                    if (message.label != null && Object.hasOwnProperty.call(message, "label"))
+                        object.label = message.label;
+                    if (message.value != null && Object.hasOwnProperty.call(message, "value"))
+                        object.value = message.value;
+                    if (message.options && message.options.length) {
+                        object.options = [];
+                        for (let j = 0; j < message.options.length; ++j)
+                            object.options[j] = message.options[j];
+                    }
+                    if (message.min != null && Object.hasOwnProperty.call(message, "min"))
+                        object.min = message.min;
+                    if (message.max != null && Object.hasOwnProperty.call(message, "max"))
+                        object.max = message.max;
+                    if (message.step != null && Object.hasOwnProperty.call(message, "step"))
+                        object.step = message.step;
+                    if (message.unit != null && Object.hasOwnProperty.call(message, "unit"))
+                        object.unit = message.unit;
+                    if (message.live != null && Object.hasOwnProperty.call(message, "live"))
+                        object.live = message.live;
+                    return object;
+                };
+
+                /**
+                 * Converts this GogglesSetting to JSON.
+                 * @function toJSON
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @instance
+                 * @returns {Object.<string,*>} JSON object
+                 */
+                GogglesSetting.prototype.toJSON = function toJSON() {
+                    return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+                };
+
+                /**
+                 * Gets the default type url for GogglesSetting
+                 * @function getTypeUrl
+                 * @memberof eyepiece.rpc.v1.GogglesSetting
+                 * @static
+                 * @param {string} [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns {string} The default type url
+                 */
+                GogglesSetting.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+                    if (typeUrlPrefix === undefined) {
+                        typeUrlPrefix = "type.googleapis.com";
+                    }
+                    return typeUrlPrefix + "/eyepiece.rpc.v1.GogglesSetting";
+                };
+
+                return GogglesSetting;
             })();
 
             return v1;

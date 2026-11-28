@@ -43,6 +43,7 @@ mod request {
         SetPreview(wire::SetPreview),
         SetCommandLine(wire::SetCommandLine),
         ListKmsOutputs(wire::ListKmsOutputs),
+        SetGogglesSetting(wire::SetGogglesSetting),
     }
 }
 
@@ -64,6 +65,7 @@ mod response {
         Metrics(wire::Metrics),
         Preview(wire::Preview),
         KmsOutputs(wire::KmsOutputs),
+        Goggles(wire::Goggles),
     }
 }
 
@@ -85,6 +87,7 @@ fn decode_request(data: &[u8]) -> Result<Request, String> {
         Message::SetPreview(value) => request::Command::SetPreview(value),
         Message::SetCommandLine(value) => request::Command::SetCommandLine(value),
         Message::ListKmsOutputs(value) => request::Command::ListKmsOutputs(value),
+        Message::SetGogglesSetting(value) => request::Command::SetGogglesSetting(value),
         _ => return Err("unexpected RPC request message".into()),
     };
     Ok(Request { id: envelope.id.unwrap_or_default(), command: Some(command) })
@@ -100,6 +103,7 @@ fn response_envelope(response: Response) -> Result<wire::Envelope, String> {
         response::Event::Metrics(value) => Message::Metrics(value),
         response::Event::Preview(value) => Message::Preview(value),
         response::Event::KmsOutputs(value) => Message::KmsOutputs(value),
+        response::Event::Goggles(value) => Message::Goggles(value),
     };
     Ok(wire::Envelope {
         id: (!response.id.is_empty()).then_some(response.id),
@@ -123,6 +127,7 @@ fn request_envelope(request: Request) -> wire::Envelope {
         request::Command::SetPreview(value) => Message::SetPreview(value),
         request::Command::SetCommandLine(value) => Message::SetCommandLine(value),
         request::Command::ListKmsOutputs(value) => Message::ListKmsOutputs(value),
+        request::Command::SetGogglesSetting(value) => Message::SetGogglesSetting(value),
     });
     wire::Envelope { id: Some(request.id), sender: None, recipient: None, message }
 }
@@ -1088,6 +1093,17 @@ fn run_worker(
         }
     }
     let preview = Arc::new(Mutex::new(preview::Subscription::default()));
+    // the goggles over the control link (control 1): status and the mods' settings, for the UI
+    let goggles = {
+        let tx = output_tx.clone();
+        crate::goggles::Monitor::spawn(saved.args.serial.clone(), move |r| {
+            let event = match r {
+                Ok(g) => response::Event::Goggles(g),
+                Err(message) => response::Event::Error(wire::Error { message }),
+            };
+            let _ = emit(&tx, "", event);
+        })
+    };
     let mut phase = "idle";
     let mut connected = false;
     let mut session: Option<Session> = None;
@@ -1226,7 +1242,14 @@ fn run_worker(
                 id = req.id;
                 let result = (|| -> Result<(), String> {
                     match req.command.ok_or("missing RPC command")? {
-                        request::Command::GetState(_) => {}
+                        request::Command::GetState(_) => {
+                            // a (re)connected UI also needs the goggles' state
+                            emit(&output_tx, "", response::Event::Goggles(goggles.last()))?;
+                        }
+                        request::Command::SetGogglesSetting(s) => {
+                            goggles.set(s.r#mod, s.key, s.value);
+                            event = Some(response::Event::Goggles(goggles.last()));
+                        }
                         command @ (request::Command::SetProperties(_)
                         | request::Command::SetCommandLine(_)) => {
                             let args = match command {

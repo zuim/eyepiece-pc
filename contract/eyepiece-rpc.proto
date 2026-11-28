@@ -82,6 +82,7 @@ message Envelope {
     SetPreview set_preview = 17;
     SetCommandLine set_command_line = 18;
     ListKmsOutputs list_kms_outputs = 19;
+    SetGogglesSetting set_goggles_setting = 20;
     // PC -> RPC client: replies and unsolicited events.
     State state = 30;
     Error error = 31;
@@ -91,6 +92,7 @@ message Envelope {
     Preview preview = 35;
     bool acknowledged = 36;
     KmsOutputs kms_outputs = 37;
+    Goggles goggles = 38;
     // PC -> bridge, followed by bridge -> PC telemetry and acknowledgements.
     Video video = 50;
     Ping ping = 51;
@@ -388,4 +390,51 @@ message KeyRequest {
 message Acknowledgement {
   reserved 1;
   uint32 status = 2;
+}
+
+// ---- the goggles over tinkerglass' control link (control 1) ----------------------------------
+// eyepiece-pc keeps the control link open while it runs and reports what it sees: unsolicited,
+// whenever something changed, and after GetState.
+
+// RPC client -> PC: change one setting of one of the goggles' mods. The goggles check it against
+// their installed schema; a change that their mod does not apply by itself reloads their UI.
+message SetGogglesSetting {
+  string mod = 1;
+  string key = 2;
+  string value = 3;
+}
+
+message Goggles {
+  bool connected = 1;               // the control link answers (the tinkerglass mods run)
+  string message = 2;               // why not, for people
+  string version = 3;               // the tinkerglass build on the goggles
+  string session = 4;               // "boot" or "start"
+  bool healthy = 5;
+  repeated GogglesApp apps = 6;
+  repeated GogglesMod mods = 7;     // the mods with settings
+}
+
+message GogglesApp {
+  string entry = 1;
+  string label = 2;
+  bool running = 3;
+}
+
+message GogglesMod {
+  string mod = 1;
+  string name = 2;
+  repeated GogglesSetting settings = 3;
+}
+
+message GogglesSetting {
+  string key = 1;
+  string type = 2;                  // "bool", "int", "enum" or "string"
+  string label = 3;
+  string value = 4;                 // as stored: bool "1"/"0", int in decimal, enum the option
+  repeated string options = 5;      // enum
+  int32 min = 6;                    // int
+  int32 max = 7;
+  int32 step = 8;
+  string unit = 9;
+  bool live = 10;                   // applies at once; else the goggles' UI reloads
 }
