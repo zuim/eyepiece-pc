@@ -19,6 +19,7 @@ export type RpcCommand = Pick<
   | "setPreview"
   | "setCommandLine"
   | "listKmsOutputs"
+  | "setGogglesSetting"
 >;
 
 export async function previewCommand(enabled: boolean, keyframesOnly = false): Promise<RpcCommand> {
@@ -222,7 +223,7 @@ export class RpcClient {
       if (validation) throw new Error(`Invalid RPC response: ${validation}`);
       if (
         !envelope.message ||
-        !["state", "error", "log", "pose", "metrics", "preview", "acknowledged", "kmsOutputs"].includes(
+        !["state", "error", "log", "pose", "metrics", "preview", "acknowledged", "kmsOutputs", "goggles"].includes(
           envelope.message,
         )
       ) {

@@ -30,16 +30,18 @@ message ClientMessage {
   oneof body {
     Hello hello = 1;
     Request request = 2;
+    Subscribe subscribe = 3;
   }
-  reserved 3 to 15;                 // Subscribe, Unsubscribe, ... (later)
+  reserved 4 to 15;
 }
 
 message ServerMessage {
   oneof body {
     Welcome welcome = 1;
     Response response = 2;
+    Event event = 3;
   }
-  reserved 3 to 15;                 // Event (status, log line, pose, telemetry; later)
+  reserved 4 to 15;
 }
 
 enum Role {
@@ -61,6 +63,11 @@ enum Capability {
   CAPABILITY_UNSPECIFIED = 0;
   CAPABILITY_LAUNCH = 1;            // Request.launch
   CAPABILITY_STATUS = 2;            // Request.status
+  CAPABILITY_CONFIG = 3;            // Request.get_config, Request.set_config
+  CAPABILITY_FILES = 4;             // Request.read_file, Request.write_file, Request.disk_usage
+  CAPABILITY_EVENTS = 5;            // Subscribe and Event
+  CAPABILITY_RELOAD = 6;            // Request.reload
+  CAPABILITY_SCHEMA = 7;            // Request.get_schema
 }
 
 message Welcome {
@@ -75,8 +82,15 @@ message Request {
   oneof body {
     Launch launch = 2;
     GetStatus status = 3;
+    GetConfig get_config = 4;
+    SetConfig set_config = 5;
+    ReadFile read_file = 6;
+    WriteFile write_file = 7;
+    GetDiskUsage disk_usage = 8;
+    Reload reload = 9;
+    GetSchema get_schema = 10;
   }
-  reserved 4 to 31;                 // settings, logs, ... (later)
+  reserved 11 to 31;
 }
 
 enum Code {
@@ -88,6 +102,9 @@ enum Code {
   CODE_ALREADY_RUNNING = 5;         // Launch without `replace` while the app runs; body says which
   CODE_FAILED = 6;                  // the app did not start, or exited during its start
   CODE_TIMEOUT = 7;                 // the app started but did not report ready in time
+  CODE_DENIED = 8;                  // not allowed here (a write below /system or /vendor)
+  CODE_NOT_FOUND = 9;               // no such file, or no such mod or setting
+  CODE_IO = 10;                     // the goggles could not read or write (message says why)
 }
 
 message Response {
@@ -97,6 +114,12 @@ message Response {
   oneof body {
     Launched launch = 4;
     Status status = 5;
+    Config config = 6;
+    ConfigSet config_set = 7;
+    FileData file = 8;
+    FileWritten written = 9;
+    DiskUsage disk_usage = 10;
+    ModSchema schema = 11;
   }
 }
 
@@ -123,6 +146,7 @@ message Status {
   string session = 2;               // "boot" or "start" (how the session was started)
   bool healthy = 3;                 // the session's health check passed
   repeated App apps = 4;            // the installed app entries (menu entries with a program)
+  string tgd = 5;                   // `tgd status`: the full status as tgd's JSON (one line)
 }
 
 message App {
@@ -130,4 +154,142 @@ message App {
   string label = 2;
   uint32 pid = 3;                   // 0: not running
   bool ready = 4;
+}
+
+// ---- settings ---------------------------------------------------------------------------------
+// The settings of a mod are the `config` of its mod.json, as the installed version's settings
+// schema has them. The goggles keep one writer for them (the settings app, this link and
+// `tgd config` share it): values are checked against the schema (an unknown choice or a number
+// that is not one becomes the default, numbers are kept within their range), merged key by key
+// and written atomically.
+
+message Setting {
+  string key = 1;
+  string value = 2;                 // as stored: bool "1"/"0", int in decimal, enum the option
+}
+
+// Every setting of one mod ("" = of every mod with settings), with the defaults filled in.
+message GetConfig {
+  string mod = 1;
+}
+
+message ModConfig {
+  string mod = 1;
+  repeated Setting values = 2;
+}
+
+message Config {
+  repeated ModConfig mods = 1;
+}
+
+// Change some settings of one mod; the others stay. With `apply`, a change that the mod does
+// not pick up by itself (a setting not marked live) reloads the goggles' UI.
+message SetConfig {
+  string mod = 1;
+  repeated Setting values = 2;
+  bool apply = 3;
+}
+
+message ConfigSet {
+  repeated Setting values = 1;      // what was stored (after the checks)
+  bool reload_needed = 2;           // a changed setting takes effect only after a UI reload
+  bool reloading = 3;               // that reload was requested (`apply`)
+}
+
+// What a mod's settings are: enough to show them without its mod.json (eyepiece-pc does).
+message GetSchema {
+  string mod = 1;
+}
+
+message ModSchema {
+  string mod = 1;
+  string name = 2;                  // the mod's name, as its mod.json has it
+  repeated Field fields = 3;
+}
+
+message Field {
+  string key = 1;
+  string type = 2;                  // "bool", "int", "enum" or "string"
+  string label = 3;
+  string default_value = 4;
+  repeated string options = 5;      // enum: the choices
+  int32 min = 6;                    // int: the range, the step and a unit ("%")
+  int32 max = 7;
+  int32 step = 8;
+  string unit = 9;
+  bool live = 10;                   // the mod applies a change itself (no UI reload)
+}
+
+// Reload the goggles' UI with the mods (what a changed setting that is not live needs).
+message Reload {}
+
+// ---- files ------------------------------------------------------------------------------------
+// Any file the link can read (it runs in the session's domain, dji_services). Writes go anywhere
+// except below /system and /vendor (those are changed only by an install), and arrive whole:
+// they are written next to the file and renamed when the last piece is in.
+
+message ReadFile {
+  string path = 1;                  // absolute
+  int64 offset = 2;                 // < 0: from the end ("the last 8 KiB": -8192)
+  uint32 length = 3;                // at most 12 KiB per request
+}
+
+message FileData {
+  bool exists = 1;
+  uint64 size = 2;                  // the whole file's
+  uint64 offset = 3;                // where `data` starts
+  bytes data = 4;
+}
+
+message WriteFile {
+  string path = 1;                  // absolute; missing directories are made
+  uint64 offset = 2;                // 0 starts the file anew; then each piece where the last ended
+  bytes data = 3;                   // at most 12 KiB per request
+  bool last = 4;                    // this piece completes the file: it replaces `path`
+  bool remove = 5;                  // delete `path` instead (data ignored)
+}
+
+message FileWritten {
+  uint64 size = 1;                  // bytes written so far
+}
+
+// The mounted file systems and their space, as `df -k` prints it.
+message GetDiskUsage {}
+
+message DiskUsage {
+  string df = 1;
+}
+
+// ---- events -----------------------------------------------------------------------------------
+// After Subscribe the server sends Events for those topics on this interface, between its
+// answers, until the next Hello. An event says what changed; the client asks for the new state.
+
+enum Topic {
+  TOPIC_UNSPECIFIED = 0;
+  TOPIC_STATUS = 1;                 // the session or tgd's status changed (start, health, crash)
+  TOPIC_CONFIG = 2;                 // a mod's settings changed (from any client or the goggles)
+}
+
+message Subscribe {
+  repeated Topic topics = 1;        // replaces the earlier subscription
+}
+
+message Event {
+  oneof body {
+    StatusChanged status = 1;
+    ConfigChanged config = 2;
+    Closing closing = 3;
+  }
+}
+
+message StatusChanged {}
+
+message ConfigChanged {
+  string mod = 1;
+}
+
+// The server stops (the session ends): nothing answers on this interface until the next session.
+// Sent to every subscriber.
+message Closing {
+  string reason = 1;
 }

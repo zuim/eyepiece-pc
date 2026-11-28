@@ -95,6 +95,9 @@ export namespace eyepiece {
                 /** Envelope listKmsOutputs */
                 listKmsOutputs?: (eyepiece.rpc.v1.IListKmsOutputs|null);
 
+                /** Envelope setGogglesSetting */
+                setGogglesSetting?: (eyepiece.rpc.v1.ISetGogglesSetting|null);
+
                 /** Envelope state */
                 state?: (eyepiece.rpc.v1.IState|null);
 
@@ -118,6 +121,9 @@ export namespace eyepiece {
 
                 /** Envelope kmsOutputs */
                 kmsOutputs?: (eyepiece.rpc.v1.IKmsOutputs|null);
+
+                /** Envelope goggles */
+                goggles?: (eyepiece.rpc.v1.IGoggles|null);
 
                 /** Envelope video */
                 video?: (eyepiece.rpc.v1.IVideo|null);
@@ -207,6 +213,9 @@ export namespace eyepiece {
                 /** Envelope listKmsOutputs. */
                 public listKmsOutputs?: (eyepiece.rpc.v1.IListKmsOutputs|null);
 
+                /** Envelope setGogglesSetting. */
+                public setGogglesSetting?: (eyepiece.rpc.v1.ISetGogglesSetting|null);
+
                 /** Envelope state. */
                 public state?: (eyepiece.rpc.v1.IState|null);
 
@@ -230,6 +239,9 @@ export namespace eyepiece {
 
                 /** Envelope kmsOutputs. */
                 public kmsOutputs?: (eyepiece.rpc.v1.IKmsOutputs|null);
+
+                /** Envelope goggles. */
+                public goggles?: (eyepiece.rpc.v1.IGoggles|null);
 
                 /** Envelope video. */
                 public video?: (eyepiece.rpc.v1.IVideo|null);
@@ -271,7 +283,7 @@ export namespace eyepiece {
                 public configureAck?: (eyepiece.rpc.v1.IAcknowledgement|null);
 
                 /** Envelope message. */
-                public message?: ("getState"|"setProperties"|"start"|"stop"|"restart"|"recenter"|"forceIdr"|"setPreview"|"setCommandLine"|"listKmsOutputs"|"state"|"error"|"log"|"pose"|"metrics"|"preview"|"acknowledged"|"kmsOutputs"|"video"|"ping"|"control"|"guiAlpha"|"pong"|"frame"|"info"|"keyRequest"|"guiAlphaAck"|"paneAlpha"|"paneAlphaAck"|"configure"|"configureAck");
+                public message?: ("getState"|"setProperties"|"start"|"stop"|"restart"|"recenter"|"forceIdr"|"setPreview"|"setCommandLine"|"listKmsOutputs"|"setGogglesSetting"|"state"|"error"|"log"|"pose"|"metrics"|"preview"|"acknowledged"|"kmsOutputs"|"goggles"|"video"|"ping"|"control"|"guiAlpha"|"pong"|"frame"|"info"|"keyRequest"|"guiAlphaAck"|"paneAlpha"|"paneAlphaAck"|"configure"|"configureAck");
 
                 /**
                  * Creates a new Envelope instance using the specified properties.
@@ -3854,6 +3866,617 @@ export namespace eyepiece {
 
                 /**
                  * Gets the default type url for Acknowledgement
+                 * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns The default type url
+                 */
+                public static getTypeUrl(typeUrlPrefix?: string): string;
+            }
+
+            /** Properties of a SetGogglesSetting. */
+            interface ISetGogglesSetting {
+
+                /** SetGogglesSetting mod */
+                mod?: (string|null);
+
+                /** SetGogglesSetting key */
+                key?: (string|null);
+
+                /** SetGogglesSetting value */
+                value?: (string|null);
+            }
+
+            /** Represents a SetGogglesSetting. */
+            class SetGogglesSetting implements ISetGogglesSetting {
+
+                /**
+                 * Constructs a new SetGogglesSetting.
+                 * @param [properties] Properties to set
+                 */
+                constructor(properties?: eyepiece.rpc.v1.ISetGogglesSetting);
+
+                /** SetGogglesSetting mod. */
+                public mod: string;
+
+                /** SetGogglesSetting key. */
+                public key: string;
+
+                /** SetGogglesSetting value. */
+                public value: string;
+
+                /**
+                 * Creates a new SetGogglesSetting instance using the specified properties.
+                 * @param [properties] Properties to set
+                 * @returns SetGogglesSetting instance
+                 */
+                public static create(properties?: eyepiece.rpc.v1.ISetGogglesSetting): eyepiece.rpc.v1.SetGogglesSetting;
+
+                /**
+                 * Encodes the specified SetGogglesSetting message. Does not implicitly {@link eyepiece.rpc.v1.SetGogglesSetting.verify|verify} messages.
+                 * @param message SetGogglesSetting message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encode(message: eyepiece.rpc.v1.ISetGogglesSetting, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Encodes the specified SetGogglesSetting message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.SetGogglesSetting.verify|verify} messages.
+                 * @param message SetGogglesSetting message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encodeDelimited(message: eyepiece.rpc.v1.ISetGogglesSetting, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Decodes a SetGogglesSetting message from the specified reader or buffer.
+                 * @param reader Reader or buffer to decode from
+                 * @param [length] Message length if known beforehand
+                 * @returns SetGogglesSetting
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): eyepiece.rpc.v1.SetGogglesSetting;
+
+                /**
+                 * Decodes a SetGogglesSetting message from the specified reader or buffer, length delimited.
+                 * @param reader Reader or buffer to decode from
+                 * @returns SetGogglesSetting
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): eyepiece.rpc.v1.SetGogglesSetting;
+
+                /**
+                 * Verifies a SetGogglesSetting message.
+                 * @param message Plain object to verify
+                 * @returns `null` if valid, otherwise the reason why it is not
+                 */
+                public static verify(message: { [k: string]: any }): (string|null);
+
+                /**
+                 * Creates a SetGogglesSetting message from a plain object. Also converts values to their respective internal types.
+                 * @param object Plain object
+                 * @returns SetGogglesSetting
+                 */
+                public static fromObject(object: { [k: string]: any }): eyepiece.rpc.v1.SetGogglesSetting;
+
+                /**
+                 * Creates a plain object from a SetGogglesSetting message. Also converts values to other types if specified.
+                 * @param message SetGogglesSetting
+                 * @param [options] Conversion options
+                 * @returns Plain object
+                 */
+                public static toObject(message: eyepiece.rpc.v1.SetGogglesSetting, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+                /**
+                 * Converts this SetGogglesSetting to JSON.
+                 * @returns JSON object
+                 */
+                public toJSON(): { [k: string]: any };
+
+                /**
+                 * Gets the default type url for SetGogglesSetting
+                 * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns The default type url
+                 */
+                public static getTypeUrl(typeUrlPrefix?: string): string;
+            }
+
+            /** Properties of a Goggles. */
+            interface IGoggles {
+
+                /** Goggles connected */
+                connected?: (boolean|null);
+
+                /** Goggles message */
+                message?: (string|null);
+
+                /** Goggles version */
+                version?: (string|null);
+
+                /** Goggles session */
+                session?: (string|null);
+
+                /** Goggles healthy */
+                healthy?: (boolean|null);
+
+                /** Goggles apps */
+                apps?: (eyepiece.rpc.v1.IGogglesApp[]|null);
+
+                /** Goggles mods */
+                mods?: (eyepiece.rpc.v1.IGogglesMod[]|null);
+            }
+
+            /** Represents a Goggles. */
+            class Goggles implements IGoggles {
+
+                /**
+                 * Constructs a new Goggles.
+                 * @param [properties] Properties to set
+                 */
+                constructor(properties?: eyepiece.rpc.v1.IGoggles);
+
+                /** Goggles connected. */
+                public connected: boolean;
+
+                /** Goggles message. */
+                public message: string;
+
+                /** Goggles version. */
+                public version: string;
+
+                /** Goggles session. */
+                public session: string;
+
+                /** Goggles healthy. */
+                public healthy: boolean;
+
+                /** Goggles apps. */
+                public apps: eyepiece.rpc.v1.IGogglesApp[];
+
+                /** Goggles mods. */
+                public mods: eyepiece.rpc.v1.IGogglesMod[];
+
+                /**
+                 * Creates a new Goggles instance using the specified properties.
+                 * @param [properties] Properties to set
+                 * @returns Goggles instance
+                 */
+                public static create(properties?: eyepiece.rpc.v1.IGoggles): eyepiece.rpc.v1.Goggles;
+
+                /**
+                 * Encodes the specified Goggles message. Does not implicitly {@link eyepiece.rpc.v1.Goggles.verify|verify} messages.
+                 * @param message Goggles message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encode(message: eyepiece.rpc.v1.IGoggles, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Encodes the specified Goggles message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.Goggles.verify|verify} messages.
+                 * @param message Goggles message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encodeDelimited(message: eyepiece.rpc.v1.IGoggles, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Decodes a Goggles message from the specified reader or buffer.
+                 * @param reader Reader or buffer to decode from
+                 * @param [length] Message length if known beforehand
+                 * @returns Goggles
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): eyepiece.rpc.v1.Goggles;
+
+                /**
+                 * Decodes a Goggles message from the specified reader or buffer, length delimited.
+                 * @param reader Reader or buffer to decode from
+                 * @returns Goggles
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): eyepiece.rpc.v1.Goggles;
+
+                /**
+                 * Verifies a Goggles message.
+                 * @param message Plain object to verify
+                 * @returns `null` if valid, otherwise the reason why it is not
+                 */
+                public static verify(message: { [k: string]: any }): (string|null);
+
+                /**
+                 * Creates a Goggles message from a plain object. Also converts values to their respective internal types.
+                 * @param object Plain object
+                 * @returns Goggles
+                 */
+                public static fromObject(object: { [k: string]: any }): eyepiece.rpc.v1.Goggles;
+
+                /**
+                 * Creates a plain object from a Goggles message. Also converts values to other types if specified.
+                 * @param message Goggles
+                 * @param [options] Conversion options
+                 * @returns Plain object
+                 */
+                public static toObject(message: eyepiece.rpc.v1.Goggles, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+                /**
+                 * Converts this Goggles to JSON.
+                 * @returns JSON object
+                 */
+                public toJSON(): { [k: string]: any };
+
+                /**
+                 * Gets the default type url for Goggles
+                 * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns The default type url
+                 */
+                public static getTypeUrl(typeUrlPrefix?: string): string;
+            }
+
+            /** Properties of a GogglesApp. */
+            interface IGogglesApp {
+
+                /** GogglesApp entry */
+                entry?: (string|null);
+
+                /** GogglesApp label */
+                label?: (string|null);
+
+                /** GogglesApp running */
+                running?: (boolean|null);
+            }
+
+            /** Represents a GogglesApp. */
+            class GogglesApp implements IGogglesApp {
+
+                /**
+                 * Constructs a new GogglesApp.
+                 * @param [properties] Properties to set
+                 */
+                constructor(properties?: eyepiece.rpc.v1.IGogglesApp);
+
+                /** GogglesApp entry. */
+                public entry: string;
+
+                /** GogglesApp label. */
+                public label: string;
+
+                /** GogglesApp running. */
+                public running: boolean;
+
+                /**
+                 * Creates a new GogglesApp instance using the specified properties.
+                 * @param [properties] Properties to set
+                 * @returns GogglesApp instance
+                 */
+                public static create(properties?: eyepiece.rpc.v1.IGogglesApp): eyepiece.rpc.v1.GogglesApp;
+
+                /**
+                 * Encodes the specified GogglesApp message. Does not implicitly {@link eyepiece.rpc.v1.GogglesApp.verify|verify} messages.
+                 * @param message GogglesApp message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encode(message: eyepiece.rpc.v1.IGogglesApp, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Encodes the specified GogglesApp message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.GogglesApp.verify|verify} messages.
+                 * @param message GogglesApp message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encodeDelimited(message: eyepiece.rpc.v1.IGogglesApp, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Decodes a GogglesApp message from the specified reader or buffer.
+                 * @param reader Reader or buffer to decode from
+                 * @param [length] Message length if known beforehand
+                 * @returns GogglesApp
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): eyepiece.rpc.v1.GogglesApp;
+
+                /**
+                 * Decodes a GogglesApp message from the specified reader or buffer, length delimited.
+                 * @param reader Reader or buffer to decode from
+                 * @returns GogglesApp
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): eyepiece.rpc.v1.GogglesApp;
+
+                /**
+                 * Verifies a GogglesApp message.
+                 * @param message Plain object to verify
+                 * @returns `null` if valid, otherwise the reason why it is not
+                 */
+                public static verify(message: { [k: string]: any }): (string|null);
+
+                /**
+                 * Creates a GogglesApp message from a plain object. Also converts values to their respective internal types.
+                 * @param object Plain object
+                 * @returns GogglesApp
+                 */
+                public static fromObject(object: { [k: string]: any }): eyepiece.rpc.v1.GogglesApp;
+
+                /**
+                 * Creates a plain object from a GogglesApp message. Also converts values to other types if specified.
+                 * @param message GogglesApp
+                 * @param [options] Conversion options
+                 * @returns Plain object
+                 */
+                public static toObject(message: eyepiece.rpc.v1.GogglesApp, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+                /**
+                 * Converts this GogglesApp to JSON.
+                 * @returns JSON object
+                 */
+                public toJSON(): { [k: string]: any };
+
+                /**
+                 * Gets the default type url for GogglesApp
+                 * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns The default type url
+                 */
+                public static getTypeUrl(typeUrlPrefix?: string): string;
+            }
+
+            /** Properties of a GogglesMod. */
+            interface IGogglesMod {
+
+                /** GogglesMod mod */
+                mod?: (string|null);
+
+                /** GogglesMod name */
+                name?: (string|null);
+
+                /** GogglesMod settings */
+                settings?: (eyepiece.rpc.v1.IGogglesSetting[]|null);
+            }
+
+            /** Represents a GogglesMod. */
+            class GogglesMod implements IGogglesMod {
+
+                /**
+                 * Constructs a new GogglesMod.
+                 * @param [properties] Properties to set
+                 */
+                constructor(properties?: eyepiece.rpc.v1.IGogglesMod);
+
+                /** GogglesMod mod. */
+                public mod: string;
+
+                /** GogglesMod name. */
+                public name: string;
+
+                /** GogglesMod settings. */
+                public settings: eyepiece.rpc.v1.IGogglesSetting[];
+
+                /**
+                 * Creates a new GogglesMod instance using the specified properties.
+                 * @param [properties] Properties to set
+                 * @returns GogglesMod instance
+                 */
+                public static create(properties?: eyepiece.rpc.v1.IGogglesMod): eyepiece.rpc.v1.GogglesMod;
+
+                /**
+                 * Encodes the specified GogglesMod message. Does not implicitly {@link eyepiece.rpc.v1.GogglesMod.verify|verify} messages.
+                 * @param message GogglesMod message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encode(message: eyepiece.rpc.v1.IGogglesMod, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Encodes the specified GogglesMod message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.GogglesMod.verify|verify} messages.
+                 * @param message GogglesMod message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encodeDelimited(message: eyepiece.rpc.v1.IGogglesMod, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Decodes a GogglesMod message from the specified reader or buffer.
+                 * @param reader Reader or buffer to decode from
+                 * @param [length] Message length if known beforehand
+                 * @returns GogglesMod
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): eyepiece.rpc.v1.GogglesMod;
+
+                /**
+                 * Decodes a GogglesMod message from the specified reader or buffer, length delimited.
+                 * @param reader Reader or buffer to decode from
+                 * @returns GogglesMod
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): eyepiece.rpc.v1.GogglesMod;
+
+                /**
+                 * Verifies a GogglesMod message.
+                 * @param message Plain object to verify
+                 * @returns `null` if valid, otherwise the reason why it is not
+                 */
+                public static verify(message: { [k: string]: any }): (string|null);
+
+                /**
+                 * Creates a GogglesMod message from a plain object. Also converts values to their respective internal types.
+                 * @param object Plain object
+                 * @returns GogglesMod
+                 */
+                public static fromObject(object: { [k: string]: any }): eyepiece.rpc.v1.GogglesMod;
+
+                /**
+                 * Creates a plain object from a GogglesMod message. Also converts values to other types if specified.
+                 * @param message GogglesMod
+                 * @param [options] Conversion options
+                 * @returns Plain object
+                 */
+                public static toObject(message: eyepiece.rpc.v1.GogglesMod, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+                /**
+                 * Converts this GogglesMod to JSON.
+                 * @returns JSON object
+                 */
+                public toJSON(): { [k: string]: any };
+
+                /**
+                 * Gets the default type url for GogglesMod
+                 * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+                 * @returns The default type url
+                 */
+                public static getTypeUrl(typeUrlPrefix?: string): string;
+            }
+
+            /** Properties of a GogglesSetting. */
+            interface IGogglesSetting {
+
+                /** GogglesSetting key */
+                key?: (string|null);
+
+                /** GogglesSetting type */
+                type?: (string|null);
+
+                /** GogglesSetting label */
+                label?: (string|null);
+
+                /** GogglesSetting value */
+                value?: (string|null);
+
+                /** GogglesSetting options */
+                options?: (string[]|null);
+
+                /** GogglesSetting min */
+                min?: (number|null);
+
+                /** GogglesSetting max */
+                max?: (number|null);
+
+                /** GogglesSetting step */
+                step?: (number|null);
+
+                /** GogglesSetting unit */
+                unit?: (string|null);
+
+                /** GogglesSetting live */
+                live?: (boolean|null);
+            }
+
+            /** Represents a GogglesSetting. */
+            class GogglesSetting implements IGogglesSetting {
+
+                /**
+                 * Constructs a new GogglesSetting.
+                 * @param [properties] Properties to set
+                 */
+                constructor(properties?: eyepiece.rpc.v1.IGogglesSetting);
+
+                /** GogglesSetting key. */
+                public key: string;
+
+                /** GogglesSetting type. */
+                public type: string;
+
+                /** GogglesSetting label. */
+                public label: string;
+
+                /** GogglesSetting value. */
+                public value: string;
+
+                /** GogglesSetting options. */
+                public options: string[];
+
+                /** GogglesSetting min. */
+                public min: number;
+
+                /** GogglesSetting max. */
+                public max: number;
+
+                /** GogglesSetting step. */
+                public step: number;
+
+                /** GogglesSetting unit. */
+                public unit: string;
+
+                /** GogglesSetting live. */
+                public live: boolean;
+
+                /**
+                 * Creates a new GogglesSetting instance using the specified properties.
+                 * @param [properties] Properties to set
+                 * @returns GogglesSetting instance
+                 */
+                public static create(properties?: eyepiece.rpc.v1.IGogglesSetting): eyepiece.rpc.v1.GogglesSetting;
+
+                /**
+                 * Encodes the specified GogglesSetting message. Does not implicitly {@link eyepiece.rpc.v1.GogglesSetting.verify|verify} messages.
+                 * @param message GogglesSetting message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encode(message: eyepiece.rpc.v1.IGogglesSetting, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Encodes the specified GogglesSetting message, length delimited. Does not implicitly {@link eyepiece.rpc.v1.GogglesSetting.verify|verify} messages.
+                 * @param message GogglesSetting message or plain object to encode
+                 * @param [writer] Writer to encode to
+                 * @returns Writer
+                 */
+                public static encodeDelimited(message: eyepiece.rpc.v1.IGogglesSetting, writer?: $protobuf.Writer): $protobuf.Writer;
+
+                /**
+                 * Decodes a GogglesSetting message from the specified reader or buffer.
+                 * @param reader Reader or buffer to decode from
+                 * @param [length] Message length if known beforehand
+                 * @returns GogglesSetting
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): eyepiece.rpc.v1.GogglesSetting;
+
+                /**
+                 * Decodes a GogglesSetting message from the specified reader or buffer, length delimited.
+                 * @param reader Reader or buffer to decode from
+                 * @returns GogglesSetting
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): eyepiece.rpc.v1.GogglesSetting;
+
+                /**
+                 * Verifies a GogglesSetting message.
+                 * @param message Plain object to verify
+                 * @returns `null` if valid, otherwise the reason why it is not
+                 */
+                public static verify(message: { [k: string]: any }): (string|null);
+
+                /**
+                 * Creates a GogglesSetting message from a plain object. Also converts values to their respective internal types.
+                 * @param object Plain object
+                 * @returns GogglesSetting
+                 */
+                public static fromObject(object: { [k: string]: any }): eyepiece.rpc.v1.GogglesSetting;
+
+                /**
+                 * Creates a plain object from a GogglesSetting message. Also converts values to other types if specified.
+                 * @param message GogglesSetting
+                 * @param [options] Conversion options
+                 * @returns Plain object
+                 */
+                public static toObject(message: eyepiece.rpc.v1.GogglesSetting, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+                /**
+                 * Converts this GogglesSetting to JSON.
+                 * @returns JSON object
+                 */
+                public toJSON(): { [k: string]: any };
+
+                /**
+                 * Gets the default type url for GogglesSetting
                  * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
                  * @returns The default type url
                  */

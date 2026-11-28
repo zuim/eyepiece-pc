@@ -6,6 +6,7 @@
   import { errorHelp } from "$lib/error-help";
   import LogPanel from "$lib/components/LogPanel.svelte";
   import OverviewPanel from "$lib/components/OverviewPanel.svelte";
+  import GogglesPanel from "$lib/components/GogglesPanel.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import StatisticsPanel from "$lib/components/StatisticsPanel.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
@@ -33,7 +34,7 @@
     type PreviewSettings,
   } from "$lib/ui-preferences";
 
-  const tabs = ["Overview", "Statistics", "Compare", "Settings", "Log"];
+  const tabs = ["Overview", "Goggles", "Statistics", "Compare", "Settings", "Log"];
   const MAX_LOG_LINES = 500;
   const UNDO_TIMEOUT_MS = 20_000;
 
@@ -61,6 +62,8 @@
   let samples = $state.raw<MetricSample[]>([]);
   let logs = $state.raw<string[]>([]);
   let activeTab = $state("Overview");
+  /** the goggles over tinkerglass' control link (control 1), as the PC side reports them */
+  let goggles = $state<RpcResponse["goggles"]>(null);
   let statusMessage = $state("");
   const statusHelp = $derived(errorHelp(statusMessage));
   let resetUndo = $state.raw<Record<string, unknown>>();
@@ -134,6 +137,8 @@
       previewSample = response.preview;
     } else if (response.kmsOutputs) {
       kmsOutputs = response.kmsOutputs.outputs ?? [];
+    } else if (response.goggles) {
+      goggles = response.goggles;
     } else if (response.error) {
       statusMessage = response.error.message ?? "RPC error";
     }
@@ -456,6 +461,8 @@
       changePaneDuringDrag={(value, mode) => paneDrag.update(value, mode)}
       cancelPaneDragUpdate={() => paneDrag.cancel()}
     />
+  {:else if activeTab === "Goggles"}
+    <GogglesPanel {goggles} set={(mod, key, value) => void send({ setGogglesSetting: { mod, key, value } })} />
   {:else if activeTab === "Statistics"}
     <StatisticsPanel {latest} {samples} {running} {pins} bind:pinWindow {pinResults} />
   {:else if activeTab === "Compare"}

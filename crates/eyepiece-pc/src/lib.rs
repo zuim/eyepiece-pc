@@ -5,6 +5,7 @@
 
 pub mod cli;
 pub mod desktop;
+pub mod goggles;
 pub mod preview;
 pub mod rpc;
 pub mod session;
